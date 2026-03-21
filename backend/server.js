@@ -8,7 +8,7 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // 🔐 FIREBASE ADMIN SETUP
-const serviceAccount = require("./serviceAccountKey.json");
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -56,7 +56,7 @@ app.get("/", (req, res) => {
 });
 
 // 🚀 START SERVER
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
