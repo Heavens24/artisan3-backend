@@ -1,252 +1,159 @@
 import { useEffect, useState } from "react";
-import { auth, db } from "../firebase";
+import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
-import {
-  collection,
-  addDoc,
-  query,
-  where,
-  onSnapshot,
-  doc,
-} from "firebase/firestore";
+import { auth, db } from "../firebase";
+import { doc, onSnapshot } from "firebase/firestore";
+import PayButton from "../components/PayButton";
 
 export default function Dashboard() {
-  const [user, setUser] = useState(null);
-  const [isPro, setIsPro] = useState(false);
-  const [task, setTask] = useState("");
-  const [priority, setPriority] = useState("normal");
-  const [dueDate, setDueDate] = useState("");
-  const [tasks, setTasks] = useState([]);
+  const { user } = useAuth();
+  const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // 🔗 PUT YOUR REAL CHECKOUT LINK HERE
-  const CHECKOUT_URL = "https://politehub.lemonsqueezy.com/checkout/buy/29904543-a23c-495d-9b8c-5d777d6d9ecd";
-
-  // ✅ AUTH + DATA LISTENERS
+  // 🔄 REAL-TIME USER DATA
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((u) => {
-      if (!u) return;
+    if (!user) return;
 
-      setUser(u);
+    const ref = doc(db, "users", user.uid);
 
-      // 🔥 PRO STATUS (FIXED — DIRECT DOC)
-      const userRef = doc(db, "users", u.uid);
-
-      const unsubUser = onSnapshot(userRef, (docSnap) => {
-        if (docSnap.exists()) {
-          setIsPro(docSnap.data().isPro || false);
-        } else {
-          setIsPro(false);
-        }
-      });
-
-      // 🔥 TASKS LISTENER
-      const taskQuery = query(
-        collection(db, "tasks"),
-        where("userId", "==", u.uid)
-      );
-
-      const unsubTasks = onSnapshot(taskQuery, (snapshot) => {
-        const list = [];
-        snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() });
-        });
-        setTasks(list);
-      });
-
-      return () => {
-        unsubUser();
-        unsubTasks();
-      };
+    const unsub = onSnapshot(ref, (docSnap) => {
+      setUserData(docSnap.data());
+      setLoading(false);
     });
 
-    return () => unsubscribe();
-  }, []);
+    return () => unsub();
+  }, [user]);
 
-  // ✅ ADD TASK
-  const addTask = async () => {
-    if (!task || !dueDate) {
-      alert("Please fill all fields");
-      return;
-    }
-
-    await addDoc(collection(db, "tasks"), {
-      title: task,
-      priority,
-      dueDate,
-      userId: user.uid,
-    });
-
-    setTask("");
-    setPriority("normal");
-    setDueDate("");
-  };
-
-  // ✅ LOGOUT
-  const handleLogout = async () => {
+  // 🔐 LOGOUT
+  const logout = async () => {
     await signOut(auth);
   };
 
-  if (!user) return <p style={{ color: "white" }}>Loading...</p>;
+  if (!user || loading) {
+    return <p style={{ padding: "30px", color: "white" }}>Loading...</p>;
+  }
 
   return (
-    <div
-      style={{
-        padding: "20px",
-        background: "#0f172a",
-        minHeight: "100vh",
-        color: "white",
-      }}
-    >
-      {/* HEADER */}
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <div>
-          <h1>🚀 Artisan3.0</h1>
-          <p>{user.email}</p>
+    <div style={{ padding: "30px", color: "white" }}>
+      
+      {/* 👋 HEADER */}
+      <h1>👋 Welcome</h1>
+      <p>{user.email}</p>
 
-          {/* 💎 PRO / UPGRADE */}
-          {isPro ? (
-            <div style={{ marginTop: "10px" }}>
-              <p style={{ color: "#22c55e", marginBottom: "8px" }}>
-                💎 You are a Pro user
-              </p>
-
-              <button
-                onClick={() =>
-                  alert("Manage billing coming soon 🚀")
-                }
-                style={{
-                  padding: "8px 12px",
-                  background: "#334155",
-                  border: "none",
-                  borderRadius: "8px",
-                  color: "white",
-                  cursor: "pointer",
-                }}
-              >
-                Manage Subscription ⚙️
-              </button>
-            </div>
-          ) : (
-            <a
-              href={`${CHECKOUT_URL}?checkout[custom][user_id]=${user.uid}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "inline-block",
-                marginTop: "10px",
-                padding: "10px 14px",
-                background: "#facc15",
-                borderRadius: "8px",
-                color: "black",
-                textDecoration: "none",
-                fontWeight: "bold",
-              }}
-            >
-              Upgrade to Pro 💎
-            </a>
-          )}
-        </div>
-
-        <button
-          onClick={handleLogout}
-          style={{
-            background: "#ef4444",
-            border: "none",
-            padding: "10px",
-            borderRadius: "8px",
-            color: "white",
-            cursor: "pointer",
-          }}
-        >
-          Logout
-        </button>
-      </div>
-
-      {/* ADD TASK */}
+      {/* 💎 SUBSCRIPTION CARD */}
       <div
         style={{
-          marginTop: "30px",
+          marginTop: "20px",
           padding: "20px",
           background: "#1e293b",
           borderRadius: "10px",
         }}
       >
-        <h2>Add Task</h2>
+        <h3>💎 Subscription</h3>
 
-        <input
-          placeholder="Task title..."
-          value={task}
-          onChange={(e) => setTask(e.target.value)}
-          style={inputStyle}
-        />
+        <p>
+          {userData?.isPro
+            ? "💎 Pro Plan — Unlimited Access"
+            : "Free Plan"}
+        </p>
 
-        <select
-          value={priority}
-          onChange={(e) => setPriority(e.target.value)}
-          style={inputStyle}
-        >
-          <option value="normal">Normal</option>
-          <option value="urgent">Urgent</option>
-        </select>
+        {/* 📊 USAGE DISPLAY */}
+        <p style={{ marginTop: "10px" }}>
+          AI Usage:{" "}
+          {userData?.isPro
+            ? "Unlimited ♾️"
+            : `${userData?.usageCount || 0}/3 used`}
+        </p>
 
-        <input
-          type="date"
-          value={dueDate}
-          onChange={(e) => setDueDate(e.target.value)}
-          style={inputStyle}
-        />
-
-        <button onClick={addTask} style={addBtn}>
-          Add Task
-        </button>
-      </div>
-
-      {/* TASK LIST */}
-      <div style={{ marginTop: "30px" }}>
-        <h2>Your Tasks</h2>
-
-        {tasks.length === 0 && <p>No tasks yet...</p>}
-
-        {tasks.map((t) => (
-          <div
-            key={t.id}
-            style={{
-              background: "#1e293b",
-              padding: "15px",
-              marginTop: "10px",
-              borderRadius: "8px",
-              borderLeft:
-                t.priority === "urgent"
-                  ? "4px solid red"
-                  : "4px solid green",
-            }}
-          >
-            <h3>{t.title}</h3>
-            <p>Priority: {t.priority}</p>
-            <p>Due: {t.dueDate}</p>
+        {/* 💳 PAYSTACK BUTTON */}
+        {!userData?.isPro && (
+          <div style={{ marginTop: "15px" }}>
+            <PayButton
+              email={user.email}
+              amount={50}
+              userId={user.uid} // ✅ FIXED
+            />
           </div>
-        ))}
+        )}
       </div>
+
+      {/* 🔧 CORE FEATURE */}
+      <div
+        style={{
+          marginTop: "20px",
+          padding: "20px",
+          background: "#0f172a",
+          borderRadius: "10px",
+        }}
+      >
+        <h3>🔧 Instant Repair Assistant</h3>
+        <p style={{ color: "#94a3b8" }}>
+          Fix problems in minutes using AI-powered diagnostics
+        </p>
+
+        <p style={{ marginTop: "10px" }}>
+          Status:{" "}
+          {userData?.isPro
+            ? "✅ Unlimited Access"
+            : (userData?.usageCount || 0) < 3
+              ? "🟡 Limited Free Access"
+              : "🔒 Locked (Upgrade Required)"}
+        </p>
+
+        {!userData?.isPro && (
+          <div style={{ marginTop: "10px" }}>
+            <PayButton
+              email={user.email}
+              amount={50}
+              userId={user.uid} // ✅ FIXED
+            />
+          </div>
+        )}
+      </div>
+
+      {/* 📊 FEATURES STATUS */}
+      <div style={{ marginTop: "20px" }}>
+        <h3>🧠 Features Status</h3>
+
+        <p>
+          Tasks:{" "}
+          {userData?.isPro
+            ? "Unlimited"
+            : "3 Free Requests"}
+        </p>
+
+        <p>
+          Priority Support:{" "}
+          {userData?.isPro
+            ? "Enabled ⚡"
+            : "Standard"}
+        </p>
+
+        <p>
+          Instant Repair Assistant:{" "}
+          {userData?.isPro
+            ? "Unlimited Access ✅"
+            : (userData?.usageCount || 0) < 3
+              ? "Available (Limited) 🟡"
+              : "Locked 🔒"}
+        </p>
+      </div>
+
+      {/* 🚪 LOGOUT */}
+      <button
+        onClick={logout}
+        style={{
+          marginTop: "30px",
+          padding: "10px",
+          background: "red",
+          border: "none",
+          borderRadius: "6px",
+          color: "white",
+          cursor: "pointer"
+        }}
+      >
+        Logout
+      </button>
     </div>
   );
 }
-
-// 🎨 STYLES
-const inputStyle = {
-  display: "block",
-  width: "100%",
-  marginTop: "10px",
-  padding: "10px",
-  borderRadius: "6px",
-  border: "none",
-};
-
-const addBtn = {
-  marginTop: "10px",
-  padding: "10px",
-  background: "#22c55e",
-  border: "none",
-  borderRadius: "6px",
-  color: "white",
-  cursor: "pointer",
-};

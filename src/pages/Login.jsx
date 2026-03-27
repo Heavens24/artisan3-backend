@@ -6,48 +6,27 @@ import { useNavigate, Link } from "react-router-dom";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-
   const navigate = useNavigate();
 
-  const handleLogin = async () => {
+  const login = async () => {
     try {
       await signInWithEmailAndPassword(auth, email, password);
       navigate("/dashboard");
-    } catch (err) {
-      setMessage(err.message);
+    } catch {
+      alert("Login failed");
     }
   };
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h1>Login</h1>
+    <div style={{ padding: "40px" }}>
+      <h2>Login</h2>
 
-      <input
-        placeholder="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-      <br /><br />
+      <input placeholder="Email" onChange={e => setEmail(e.target.value)} /><br />
+      <input type="password" placeholder="Password" onChange={e => setPassword(e.target.value)} /><br />
 
-      <input
-        placeholder="Password"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <br /><br />
+      <button onClick={login}>Login</button>
 
-      <button onClick={handleLogin}>Login</button>
-
-      <p>{message}</p>
-
-      <br />
-
-      {/* 👇 NEW LINK */}
-      <p>
-        Don’t have an account? <Link to="/register">Create one</Link>
-      </p>
+      <p>No account? <Link to="/register">Register</Link></p>
     </div>
   );
 }

@@ -1,14 +1,22 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const admin = require("firebase-admin");
+const axios = require("axios");
 
 const app = express();
-app.use(cors());
+
+// ✅ CORS
+app.use(cors({
+  origin: "http://localhost:5174"
+}));
+
 app.use(bodyParser.json());
 
-// 🔐 FIREBASE ADMIN SETUP
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+// 🔐 Firebase setup
+const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -16,47 +24,189 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// 🚀 WEBHOOK ROUTE
-app.post("/webhook", async (req, res) => {
+
+// =====================================================
+// 🤖 AI ROUTE (MONETIZED)
+// =====================================================
+app.post("/ai", async (req, res) => {
+  const { prompt, userId } = req.body;
+
+  if (!prompt || !userId) {
+    return res.status(400).json({ error: "Prompt and userId required" });
+  }
+
   try {
-    const event = req.body;
+    console.log("📩 Prompt:", prompt);
+    console.log("👤 User:", userId);
 
-    console.log("🔥 Webhook received:", JSON.stringify(event, null, 2));
+    const userRef = db.collection("users").doc(userId);
+    const userSnap = await userRef.get();
 
-    // ✅ GET USER ID FROM LEMONSQUEEZY
-    const userId =
-      event?.meta?.custom_data?.user_id ||
-      event?.data?.attributes?.custom_data?.user_id;
-
-    if (!userId) {
-      console.log("❌ No userId found in webhook");
-      return res.sendStatus(400);
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: "User not found" });
     }
 
-    // ✅ UPGRADE USER IN FIRESTORE
-    await db.collection("users").doc(userId).set(
+    const userData = userSnap.data();
+
+    const isPro = userData.isPro || false;
+
+    // ⏱ DAILY LIMIT LOGIC
+    const today = new Date().toISOString().split("T")[0];
+    const lastUsedDate = userData.lastUsedDate || "";
+    let usageCount = userData.usageCount || 0;
+
+    if (lastUsedDate !== today) {
+      usageCount = 0;
+    }
+
+    console.log("📊 Usage:", usageCount, "| Pro:", isPro);
+
+    // 🚫 LIMIT FREE USERS
+    if (!isPro && usageCount >= 3) {
+      return res.status(403).json({
+        error: "Daily free limit reached. Upgrade to Pro."
+      });
+    }
+
+    // 🤖 CALL OPENAI
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1-mini",
+        input: [
+          {
+            role: "user",
+            content: `You are a professional artisan assistant. Help step-by-step:\n\n${prompt}`
+          }
+        ]
+      }),
+    });
+
+    const text = await response.text();
+    console.log("📦 RAW RESPONSE:", text);
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return res.status(500).json({ error: "Invalid JSON from OpenAI" });
+    }
+
+    if (!response.ok) {
+      console.error("❌ OpenAI error:", data);
+      return res.status(500).json({
+        error: data.error?.message || "AI failed"
+      });
+    }
+
+    const reply =
+      data?.output?.[0]?.content?.[0]?.text ||
+      "No response from AI";
+
+    // 📊 UPDATE USER DATA
+    if (!isPro) {
+      await userRef.set(
+        {
+          usageCount: usageCount + 1,
+          lastUsedDate: today
+        },
+        { merge: true }
+      );
+    }
+
+    // 📊 ANALYTICS
+    await userRef.set(
       {
-        isPro: true,
+        totalUsage: admin.firestore.FieldValue.increment(1)
       },
       { merge: true }
     );
 
-    console.log("✅ User upgraded to PRO:", userId);
+    // 💾 SAVE HISTORY
+    await db.collection("history").add({
+      userId,
+      prompt,
+      reply,
+      createdAt: new Date()
+    });
 
-    res.sendStatus(200);
-  } catch (error) {
-    console.error("❌ Webhook error:", error);
-    res.sendStatus(500);
+    res.json({ reply });
+
+  } catch (err) {
+    console.error("❌ Server error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// ✅ TEST ROUTE
-app.get("/", (req, res) => {
-  res.send("🚀 Backend is running");
+
+// =====================================================
+// 💰 PAYSTACK VERIFY PAYMENT (CRITICAL)
+// =====================================================
+app.post("/verify-payment", async (req, res) => {
+  const { reference, userId } = req.body;
+
+  if (!reference || !userId) {
+    return res.status(400).json({ error: "Missing reference or userId" });
+  }
+
+  try {
+    console.log("💳 Verifying payment:", reference);
+
+    const response = await axios.get(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        },
+      }
+    );
+
+    const data = response.data;
+
+    console.log("📦 Paystack response:", data);
+
+    // ✅ CHECK SUCCESS
+    if (data.data.status === "success") {
+      const userRef = db.collection("users").doc(userId);
+
+      await userRef.set(
+        {
+          isPro: true,
+          paidAt: new Date(),
+          paymentRef: reference
+        },
+        { merge: true }
+      );
+
+      console.log("✅ USER UPGRADED TO PRO:", userId);
+
+      return res.json({ success: true });
+    } else {
+      return res.status(400).json({ error: "Payment not successful" });
+    }
+
+  } catch (err) {
+    console.error("❌ Payment verification error:", err.response?.data || err.message);
+    res.status(500).json({ error: "Payment verification failed" });
+  }
 });
 
+
+// =====================================================
+// ✅ TEST ROUTE
+// =====================================================
+app.get("/", (req, res) => {
+  res.send("Backend running");
+});
+
+
+// =====================================================
 // 🚀 START SERVER
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+// =====================================================
+app.listen(5000, () => {
+  console.log("🚀 Server running on port 5000");
 });

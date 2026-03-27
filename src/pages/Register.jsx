@@ -1,53 +1,36 @@
 import { useState } from "react";
-import { auth } from "../firebase";
+import { auth, db } from "../firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
 import { useNavigate, Link } from "react-router-dom";
 
 export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-
   const navigate = useNavigate();
 
-  const handleRegister = async () => {
-    try {
-      await createUserWithEmailAndPassword(auth, email, password);
-      navigate("/dashboard");
-    } catch (err) {
-      setMessage(err.message);
-    }
+  const register = async () => {
+    const userCred = await createUserWithEmailAndPassword(auth, email, password);
+
+    await setDoc(doc(db, "users", userCred.user.uid), {
+      uid: userCred.user.uid,
+      email,
+      isPro: false
+    });
+
+    navigate("/dashboard");
   };
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h1>Register</h1>
+    <div style={{ padding: "40px" }}>
+      <h2>Register</h2>
 
-      <input
-        placeholder="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-      <br /><br />
+      <input placeholder="Email" onChange={e => setEmail(e.target.value)} /><br />
+      <input type="password" placeholder="Password" onChange={e => setPassword(e.target.value)} /><br />
 
-      <input
-        placeholder="Password"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <br /><br />
+      <button onClick={register}>Register</button>
 
-      <button onClick={handleRegister}>Register</button>
-
-      <p>{message}</p>
-
-      <br />
-
-      {/* 👇 NEW LINK */}
-      <p>
-        Already have an account? <Link to="/login">Login</Link>
-      </p>
+      <p>Already have an account? <Link to="/login">Login</Link></p>
     </div>
   );
 }
