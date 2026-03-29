@@ -18,28 +18,31 @@ export default function Sidebar() {
   });
 
   return (
-    <div style={{
-      width: "220px",
-      height: "100vh",
-      background: "#0f172a",
-      padding: "20px",
-      position: "fixed"
-    }}>
-      
+    <div
+      style={{
+        width: "220px",
+        height: "100vh",
+        background: "#0f172a",
+        padding: "20px",
+        position: "fixed",
+        top: 0,
+        left: 0,
+      }}
+    >
       {/* 🔥 BRANDING */}
       <h2 style={{ color: "#00ffcc" }}>🛠 Artisan3.0</h2>
       <p style={{ color: "#94a3b8", fontSize: "12px", marginBottom: "20px" }}>
         Your Pocket Assistant
       </p>
 
-      {/* 📊 MAIN NAV */}
+      {/* 📊 NAV */}
       <Link to="/dashboard" style={linkStyle("/dashboard")}>Dashboard</Link>
       <Link to="/tasks" style={linkStyle("/tasks")}>Tasks</Link>
       <Link to="/tools" style={linkStyle("/tools")}>Tools</Link>
       <Link to="/logs" style={linkStyle("/logs")}>Job Logs</Link>
       <Link to="/knowledge" style={linkStyle("/knowledge")}>Knowledge</Link>
 
-      {/* 🔧 REPOSITIONED AI */}
+      {/* 🔧 AI TOOL */}
       <Link to="/ai" style={linkStyle("/ai")}>
         🔧 Instant Repair Assistant
       </Link>

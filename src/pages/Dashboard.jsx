@@ -24,6 +24,52 @@ export default function Dashboard() {
     return () => unsub();
   }, [user]);
 
+  // 💰 ✅ SMART PAYMENT VERIFY (LOCALSTORAGE BASED — FIXED)
+  useEffect(() => {
+    if (!user) return;
+
+    const verifyPayment = async () => {
+      const storedRef = localStorage.getItem("paymentReference");
+      const storedUser = localStorage.getItem("paymentUserId");
+
+      if (!storedRef || !storedUser) return;
+
+      console.log("🔍 Verifying stored payment...");
+
+      try {
+        const res = await fetch("http://localhost:5000/verify-payment", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            reference: storedRef,
+            userId: storedUser,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          alert("🎉 You are now PRO!");
+
+          // ✅ CLEAN STORAGE
+          localStorage.removeItem("paymentReference");
+          localStorage.removeItem("paymentUserId");
+
+          window.location.reload();
+        } else {
+          console.log("⚠️ Payment not verified yet");
+        }
+
+      } catch (err) {
+        console.error("❌ Verify error:", err);
+      }
+    };
+
+    verifyPayment();
+  }, [user]);
+
   // 🔐 LOGOUT
   const logout = async () => {
     await signOut(auth);
@@ -40,7 +86,7 @@ export default function Dashboard() {
       <h1>👋 Welcome</h1>
       <p>{user.email}</p>
 
-      {/* 💎 SUBSCRIPTION CARD */}
+      {/* 💎 SUBSCRIPTION */}
       <div
         style={{
           marginTop: "20px",
@@ -57,7 +103,6 @@ export default function Dashboard() {
             : "Free Plan"}
         </p>
 
-        {/* 📊 USAGE DISPLAY */}
         <p style={{ marginTop: "10px" }}>
           AI Usage:{" "}
           {userData?.isPro
@@ -65,19 +110,15 @@ export default function Dashboard() {
             : `${userData?.usageCount || 0}/3 used`}
         </p>
 
-        {/* 💳 PAYSTACK BUTTON */}
         {!userData?.isPro && (
           <div style={{ marginTop: "15px" }}>
-            <PayButton
-              email={user.email}
-              amount={50}
-              userId={user.uid} // ✅ FIXED
-            />
+            {/* ✅ FIXED: PASS userId */}
+            <PayButton email={user.email} userId={user.uid} />
           </div>
         )}
       </div>
 
-      {/* 🔧 CORE FEATURE */}
+      {/* 🔧 FEATURE */}
       <div
         style={{
           marginTop: "20px",
@@ -87,56 +128,22 @@ export default function Dashboard() {
         }}
       >
         <h3>🔧 Instant Repair Assistant</h3>
-        <p style={{ color: "#94a3b8" }}>
-          Fix problems in minutes using AI-powered diagnostics
-        </p>
 
-        <p style={{ marginTop: "10px" }}>
+        <p>
           Status:{" "}
           {userData?.isPro
             ? "✅ Unlimited Access"
             : (userData?.usageCount || 0) < 3
               ? "🟡 Limited Free Access"
-              : "🔒 Locked (Upgrade Required)"}
+              : "🔒 Locked"}
         </p>
 
         {!userData?.isPro && (
           <div style={{ marginTop: "10px" }}>
-            <PayButton
-              email={user.email}
-              amount={50}
-              userId={user.uid} // ✅ FIXED
-            />
+            {/* ✅ FIXED HERE TOO */}
+            <PayButton email={user.email} userId={user.uid} />
           </div>
         )}
-      </div>
-
-      {/* 📊 FEATURES STATUS */}
-      <div style={{ marginTop: "20px" }}>
-        <h3>🧠 Features Status</h3>
-
-        <p>
-          Tasks:{" "}
-          {userData?.isPro
-            ? "Unlimited"
-            : "3 Free Requests"}
-        </p>
-
-        <p>
-          Priority Support:{" "}
-          {userData?.isPro
-            ? "Enabled ⚡"
-            : "Standard"}
-        </p>
-
-        <p>
-          Instant Repair Assistant:{" "}
-          {userData?.isPro
-            ? "Unlimited Access ✅"
-            : (userData?.usageCount || 0) < 3
-              ? "Available (Limited) 🟡"
-              : "Locked 🔒"}
-        </p>
       </div>
 
       {/* 🚪 LOGOUT */}
@@ -149,7 +156,7 @@ export default function Dashboard() {
           border: "none",
           borderRadius: "6px",
           color: "white",
-          cursor: "pointer"
+          cursor: "pointer",
         }}
       >
         Logout

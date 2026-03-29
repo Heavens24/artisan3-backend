@@ -3,160 +3,73 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const admin = require("firebase-admin");
-const axios = require("axios");
+const fetch = require("node-fetch");
+
+const { admin, db } = require("./firebaseAdmin");
 
 const app = express();
 
 // ✅ CORS
-app.use(cors({
-  origin: "http://localhost:5174"
-}));
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+  })
+);
 
 app.use(bodyParser.json());
 
-// 🔐 Firebase setup
-const serviceAccount = require("./serviceAccountKey.json");
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+// ✅ TEST ROUTE
+app.get("/", (req, res) => {
+  res.send("🚀 Artisan3.0 Backend Running");
 });
 
-const db = admin.firestore();
 
+// 💳 PAYSTACK INIT
+app.post("/pay", async (req, res) => {
+  const { email } = req.body;
 
-// =====================================================
-// 🤖 AI ROUTE (MONETIZED)
-// =====================================================
-app.post("/ai", async (req, res) => {
-  const { prompt, userId } = req.body;
-
-  if (!prompt || !userId) {
-    return res.status(400).json({ error: "Prompt and userId required" });
+  if (!email) {
+    return res.status(400).json({ error: "Email is required" });
   }
 
   try {
-    console.log("📩 Prompt:", prompt);
-    console.log("👤 User:", userId);
-
-    const userRef = db.collection("users").doc(userId);
-    const userSnap = await userRef.get();
-
-    if (!userSnap.exists) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const userData = userSnap.data();
-
-    const isPro = userData.isPro || false;
-
-    // ⏱ DAILY LIMIT LOGIC
-    const today = new Date().toISOString().split("T")[0];
-    const lastUsedDate = userData.lastUsedDate || "";
-    let usageCount = userData.usageCount || 0;
-
-    if (lastUsedDate !== today) {
-      usageCount = 0;
-    }
-
-    console.log("📊 Usage:", usageCount, "| Pro:", isPro);
-
-    // 🚫 LIMIT FREE USERS
-    if (!isPro && usageCount >= 3) {
-      return res.status(403).json({
-        error: "Daily free limit reached. Upgrade to Pro."
-      });
-    }
-
-    // 🤖 CALL OPENAI
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4.1-mini",
-        input: [
-          {
-            role: "user",
-            content: `You are a professional artisan assistant. Help step-by-step:\n\n${prompt}`
-          }
-        ]
-      }),
-    });
-
-    const text = await response.text();
-    console.log("📦 RAW RESPONSE:", text);
-
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return res.status(500).json({ error: "Invalid JSON from OpenAI" });
-    }
-
-    if (!response.ok) {
-      console.error("❌ OpenAI error:", data);
-      return res.status(500).json({
-        error: data.error?.message || "AI failed"
-      });
-    }
-
-    const reply =
-      data?.output?.[0]?.content?.[0]?.text ||
-      "No response from AI";
-
-    // 📊 UPDATE USER DATA
-    if (!isPro) {
-      await userRef.set(
-        {
-          usageCount: usageCount + 1,
-          lastUsedDate: today
-        },
-        { merge: true }
-      );
-    }
-
-    // 📊 ANALYTICS
-    await userRef.set(
+    const response = await fetch(
+      "https://api.paystack.co/transaction/initialize",
       {
-        totalUsage: admin.firestore.FieldValue.increment(1)
-      },
-      { merge: true }
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          amount: 5000 * 100,
+          currency: "ZAR",
+          callback_url: "http://localhost:5173/dashboard",
+          metadata: { userId: email },
+        }),
+      }
     );
 
-    // 💾 SAVE HISTORY
-    await db.collection("history").add({
-      userId,
-      prompt,
-      reply,
-      createdAt: new Date()
-    });
-
-    res.json({ reply });
-
-  } catch (err) {
-    console.error("❌ Server error:", err);
-    res.status(500).json({ error: "Server error" });
+    const data = await response.json();
+    return res.json(data);
+  } catch (error) {
+    console.error("❌ Pay error:", error);
+    res.status(500).json({ error: "Payment failed" });
   }
 });
 
 
-// =====================================================
-// 💰 PAYSTACK VERIFY PAYMENT (CRITICAL)
-// =====================================================
+// 🔍 VERIFY PAYMENT
 app.post("/verify-payment", async (req, res) => {
   const { reference, userId } = req.body;
 
   if (!reference || !userId) {
-    return res.status(400).json({ error: "Missing reference or userId" });
+    return res.status(400).json({ error: "Missing data" });
   }
 
   try {
-    console.log("💳 Verifying payment:", reference);
-
-    const response = await axios.get(
+    const response = await fetch(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
         headers: {
@@ -165,48 +78,52 @@ app.post("/verify-payment", async (req, res) => {
       }
     );
 
-    const data = response.data;
+    const data = await response.json();
 
-    console.log("📦 Paystack response:", data);
-
-    // ✅ CHECK SUCCESS
-    if (data.data.status === "success") {
-      const userRef = db.collection("users").doc(userId);
-
-      await userRef.set(
-        {
-          isPro: true,
-          paidAt: new Date(),
-          paymentRef: reference
-        },
+    if (data?.data?.status === "success") {
+      await db.collection("users").doc(userId).set(
+        { isPro: true },
         { merge: true }
       );
 
-      console.log("✅ USER UPGRADED TO PRO:", userId);
-
       return res.json({ success: true });
-    } else {
-      return res.status(400).json({ error: "Payment not successful" });
     }
 
-  } catch (err) {
-    console.error("❌ Payment verification error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Payment verification failed" });
+    return res.json({ success: false });
+  } catch (error) {
+    console.error("❌ Verify error:", error);
+    res.status(500).json({ error: "Verification failed" });
   }
 });
 
 
-// =====================================================
-// ✅ TEST ROUTE
-// =====================================================
-app.get("/", (req, res) => {
-  res.send("Backend running");
+// 🔔 SEND NOTIFICATION
+app.post("/send-notification", async (req, res) => {
+  const { token, title, body } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: "Missing token" });
+  }
+
+  try {
+    const message = {
+      notification: { title, body },
+      token,
+    };
+
+    await admin.messaging().send(message);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("❌ Notification error:", error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 
-// =====================================================
 // 🚀 START SERVER
-// =====================================================
-app.listen(5000, () => {
-  console.log("🚀 Server running on port 5000");
+const PORT = 5000;
+
+app.listen(PORT, () => {
+  console.log(`🔥 Server running on http://localhost:${PORT}`);
 });
