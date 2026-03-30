@@ -3,127 +3,121 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const fetch = require("node-fetch");
-
-const { admin, db } = require("./firebaseAdmin");
+const admin = require("firebase-admin");
 
 const app = express();
 
-// ✅ CORS
-app.use(
-  cors({
-    origin: "http://localhost:5173",
-  })
-);
+// ✅ CORS (IMPORTANT)
+app.use(cors({
+  origin: "http://localhost:5173"
+}));
 
 app.use(bodyParser.json());
 
-// ✅ TEST ROUTE
-app.get("/", (req, res) => {
-  res.send("🚀 Artisan3.0 Backend Running");
+// 🔐 Firebase Admin Setup
+const serviceAccount = require("./serviceAccountKey.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
 });
 
+const db = admin.firestore();
 
-// 💳 PAYSTACK INIT
-app.post("/pay", async (req, res) => {
-  const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ error: "Email is required" });
-  }
-
+// ============================================
+// 🔔 MANUAL NOTIFICATION ROUTE (TEST BUTTON)
+// ============================================
+app.post("/notify-user", async (req, res) => {
   try {
-    const response = await fetch(
-      "https://api.paystack.co/transaction/initialize",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email,
-          amount: 5000 * 100,
-          currency: "ZAR",
-          callback_url: "http://localhost:5173/dashboard",
-          metadata: { userId: email },
-        }),
-      }
-    );
+    const { userId, message } = req.body;
 
-    const data = await response.json();
-    return res.json(data);
-  } catch (error) {
-    console.error("❌ Pay error:", error);
-    res.status(500).json({ error: "Payment failed" });
-  }
-});
-
-
-// 🔍 VERIFY PAYMENT
-app.post("/verify-payment", async (req, res) => {
-  const { reference, userId } = req.body;
-
-  if (!reference || !userId) {
-    return res.status(400).json({ error: "Missing data" });
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.paystack.co/transaction/verify/${reference}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        },
-      }
-    );
-
-    const data = await response.json();
-
-    if (data?.data?.status === "success") {
-      await db.collection("users").doc(userId).set(
-        { isPro: true },
-        { merge: true }
-      );
-
-      return res.json({ success: true });
+    if (!userId) {
+      return res.status(400).json({ error: "User ID required" });
     }
 
-    return res.json({ success: false });
-  } catch (error) {
-    console.error("❌ Verify error:", error);
-    res.status(500).json({ error: "Verification failed" });
-  }
-});
+    const userDoc = await db.collection("users").doc(userId).get();
 
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: "User not found" });
+    }
 
-// 🔔 SEND NOTIFICATION
-app.post("/send-notification", async (req, res) => {
-  const { token, title, body } = req.body;
+    const { fcmToken } = userDoc.data();
 
-  if (!token) {
-    return res.status(400).json({ error: "Missing token" });
-  }
+    if (!fcmToken) {
+      return res.status(400).json({ error: "No FCM token" });
+    }
 
-  try {
-    const message = {
-      notification: { title, body },
-      token,
-    };
-
-    await admin.messaging().send(message);
+    await admin.messaging().send({
+      notification: {
+        title: "🔔 Artisan Alert",
+        body: message || "Test notification",
+      },
+      token: fcmToken,
+    });
 
     res.json({ success: true });
-  } catch (error) {
-    console.error("❌ Notification error:", error);
-    res.status(500).json({ error: error.message });
+
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
+// ============================================
+// 🔥 AUTO ALERT SYSTEM (MAIN FEATURE)
+// ============================================
+setInterval(async () => {
+  try {
+    const now = new Date();
 
+    const snapshot = await db.collection("tasks").get();
+
+    for (const docSnap of snapshot.docs) {
+      const task = docSnap.data();
+
+      if (!task.reminderTime || task.notified) continue;
+
+      const reminderTime = new Date(task.reminderTime);
+
+      if (now >= reminderTime) {
+        const userDoc = await db
+          .collection("users")
+          .doc(task.userId)
+          .get();
+
+        if (!userDoc.exists) continue;
+
+        const { fcmToken } = userDoc.data();
+
+        if (!fcmToken) continue;
+
+        // 🔔 SEND NOTIFICATION
+        await admin.messaging().send({
+          notification: {
+            title: "⏰ Task Reminder",
+            body: task.title,
+          },
+          token: fcmToken,
+        });
+
+        console.log("🔔 Auto alert sent:", task.title);
+
+        // ✅ MARK AS NOTIFIED
+        await db.collection("tasks").doc(docSnap.id).update({
+          notified: true,
+        });
+      }
+    }
+
+  } catch (err) {
+    console.log("❌ Auto alert error:", err.message);
+  }
+}, 30000); // every 30 seconds
+
+// ============================================
 // 🚀 START SERVER
+// ============================================
 const PORT = 5000;
 
 app.listen(PORT, () => {
-  console.log(`🔥 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
