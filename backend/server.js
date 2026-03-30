@@ -7,15 +7,35 @@ const admin = require("firebase-admin");
 
 const app = express();
 
-// ✅ CORS (IMPORTANT)
+// ============================================
+// ✅ CORS
+// ============================================
 app.use(cors({
-  origin: "http://localhost:5173"
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:5174"
+  ]
 }));
 
 app.use(bodyParser.json());
 
-// 🔐 Firebase Admin Setup
-const serviceAccount = require("./serviceAccountKey.json");
+// ============================================
+// 🔐 FIREBASE ADMIN SETUP (ENV SAFE)
+// ============================================
+
+if (!process.env.FIREBASE_KEY) {
+  console.error("❌ FIREBASE_KEY is missing");
+  process.exit(1);
+}
+
+let serviceAccount;
+
+try {
+  serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+} catch (err) {
+  console.error("❌ Invalid FIREBASE_KEY JSON");
+  process.exit(1);
+}
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -24,7 +44,7 @@ admin.initializeApp({
 const db = admin.firestore();
 
 // ============================================
-// 🔔 MANUAL NOTIFICATION ROUTE (TEST BUTTON)
+// 🔔 MANUAL NOTIFICATION ROUTE
 // ============================================
 app.post("/notify-user", async (req, res) => {
   try {
@@ -48,7 +68,7 @@ app.post("/notify-user", async (req, res) => {
 
     await admin.messaging().send({
       notification: {
-        title: "🔔 Artisan Alert",
+        title: "🔔 Artisan3.0 Alert",
         body: message || "Test notification",
       },
       token: fcmToken,
@@ -57,13 +77,13 @@ app.post("/notify-user", async (req, res) => {
     res.json({ success: true });
 
   } catch (err) {
-    console.log(err);
+    console.error("❌ Notify error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ============================================
-// 🔥 AUTO ALERT SYSTEM (MAIN FEATURE)
+// 🔥 AUTO ALERT SYSTEM
 // ============================================
 setInterval(async () => {
   try {
@@ -90,7 +110,6 @@ setInterval(async () => {
 
         if (!fcmToken) continue;
 
-        // 🔔 SEND NOTIFICATION
         await admin.messaging().send({
           notification: {
             title: "⏰ Task Reminder",
@@ -101,7 +120,6 @@ setInterval(async () => {
 
         console.log("🔔 Auto alert sent:", task.title);
 
-        // ✅ MARK AS NOTIFIED
         await db.collection("tasks").doc(docSnap.id).update({
           notified: true,
         });
@@ -109,15 +127,22 @@ setInterval(async () => {
     }
 
   } catch (err) {
-    console.log("❌ Auto alert error:", err.message);
+    console.error("❌ Auto alert error:", err.message);
   }
-}, 30000); // every 30 seconds
+}, 30000);
+
+// ============================================
+// 🧪 HEALTH CHECK
+// ============================================
+app.get("/", (req, res) => {
+  res.send("🚀 Artisan3.0 Backend Running");
+});
 
 // ============================================
 // 🚀 START SERVER
 // ============================================
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Artisan3.0 server running on port ${PORT}`);
 });
