@@ -1,48 +1,66 @@
-import { getMessaging, getToken, onMessage, isSupported } from "firebase/messaging";
-import { app } from "./firebase";
+import { messaging, db } from "./firebase";
+import { getToken, onMessage } from "firebase/messaging";
+import { doc, setDoc } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
-let messaging = null;
-
-// ✅ Prevent crash on unsupported browsers
-export const initMessaging = async () => {
-  const supported = await isSupported();
-  if (!supported) {
-    console.log("❌ FCM not supported on this browser");
-    return null;
-  }
-
-  messaging = getMessaging(app);
-  return messaging;
-};
-
-// 🔔 REQUEST PERMISSION
+// 🔔 REQUEST + AUTO SAVE TOKEN
 export const requestPermission = async () => {
   try {
-    if (!messaging) await initMessaging();
+    if (!("Notification" in window)) return;
 
     const permission = await Notification.requestPermission();
 
-    if (permission === "granted") {
-      const token = await getToken(messaging, {
-        vapidKey: "BD_z_ra8Xhp8zVLd1PzMfwUn-_NcPhBHTMc4tLpziiok08K5shAJT2h0bGAPxOC_PhfJIALT36z2EcMZ9Hm0L40",
-      });
-
-      console.log("🔥 FCM TOKEN:", token);
-    } else {
-      console.log("❌ Notification permission denied");
+    if (permission !== "granted") {
+      console.log("❌ Permission denied");
+      return;
     }
-  } catch (error) {
-    console.error("❌ Error getting permission:", error);
+
+    console.log("✅ Permission granted");
+
+    const token = await getToken(messaging, {
+      vapidKey: "YOUR_VAPID_KEY_HERE",
+    });
+
+    if (!token) return;
+
+    console.log("🔥 FCM TOKEN:", token);
+
+    const auth = getAuth();
+    const user = auth.currentUser;
+
+    if (!user) {
+      console.log("⚠️ User not ready");
+      return;
+    }
+
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        fcmToken: token,
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    console.log("✅ Token saved to Firestore");
+  } catch (err) {
+    console.log("❌ FCM error:", err.message);
   }
 };
 
-// 📩 FOREGROUND MESSAGES
-export const listenNotifications = async () => {
-  if (!messaging) await initMessaging();
+// 🔔 FOREGROUND LISTENER
+export const listenNotifications = () => {
+  try {
+    onMessage(messaging, (payload) => {
+      console.log("🔔 Foreground:", payload);
 
-  onMessage(messaging, (payload) => {
-    console.log("🔔 Message received:", payload);
-
-    alert(payload?.notification?.title || "New Notification");
-  });
+      if (payload?.notification) {
+        alert(
+          `${payload.notification.title}\n${payload.notification.body}`
+        );
+      }
+    });
+  } catch (err) {
+    console.log("⚠️ Listener error:", err.message);
+  }
 };

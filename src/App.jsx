@@ -5,7 +5,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 
 import Sidebar from "./components/Sidebar";
 
-// 🔔 FCM (SAFE IMPORT)
+// 🔔 FCM
 import {
   requestPermission,
   listenNotifications,
@@ -41,7 +41,7 @@ function Protected({ children }) {
 function AppRoutes() {
   const { user } = useAuth();
 
-  // 🔔 SAFE FCM INIT (WILL NEVER CRASH APP)
+  // 🔔 SAFE FCM INIT (ULTRA STABLE)
   useEffect(() => {
     let isMounted = true;
 
@@ -50,18 +50,26 @@ function AppRoutes() {
         // ✅ Only run in browser
         if (typeof window === "undefined") return;
 
-        // ✅ Check notification support
+        // ✅ Check support
         if (!("Notification" in window)) {
           console.log("❌ Notifications not supported");
           return;
         }
 
-        // ✅ Initialize safely
+        // ⚠️ IMPORTANT: Wait for user to exist
+        if (!user) {
+          console.log("⏳ Waiting for user before FCM...");
+          return;
+        }
+
+        // 🔔 Request + Save Token
         await requestPermission();
 
+        // 🔔 Listen for messages
         if (isMounted) {
-          await listenNotifications();
+          listenNotifications();
         }
+
       } catch (err) {
         console.log("⚠️ FCM skipped safely:", err.message);
       }
@@ -72,7 +80,7 @@ function AppRoutes() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [user]); // ✅ IMPORTANT FIX (runs when user is ready)
 
   // 🛑 Prevent white screen
   if (user === undefined) {
@@ -102,56 +110,32 @@ function AppRoutes() {
           {/* Protected */}
           <Route
             path="/dashboard"
-            element={
-              <Protected>
-                <Dashboard />
-              </Protected>
-            }
+            element={<Protected><Dashboard /></Protected>}
           />
 
           <Route
             path="/tasks"
-            element={
-              <Protected>
-                <Tasks />
-              </Protected>
-            }
+            element={<Protected><Tasks /></Protected>}
           />
 
           <Route
             path="/tools"
-            element={
-              <Protected>
-                <Tools />
-              </Protected>
-            }
+            element={<Protected><Tools /></Protected>}
           />
 
           <Route
             path="/logs"
-            element={
-              <Protected>
-                <Logs />
-              </Protected>
-            }
+            element={<Protected><Logs /></Protected>}
           />
 
           <Route
             path="/knowledge"
-            element={
-              <Protected>
-                <Knowledge />
-              </Protected>
-            }
+            element={<Protected><Knowledge /></Protected>}
           />
 
           <Route
             path="/ai"
-            element={
-              <Protected>
-                <AI />
-              </Protected>
-            }
+            element={<Protected><AI /></Protected>}
           />
         </Routes>
       </div>
