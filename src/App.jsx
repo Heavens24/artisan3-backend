@@ -2,22 +2,30 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 
 import { AuthProvider, useAuth } from "./context/AuthContext";
-
 import Sidebar from "./components/Sidebar";
 
-// 🔔 FCM
 import {
   requestPermission,
   listenNotifications,
 } from "./firebase-messaging";
 
+import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "./firebase";
+
 // Pages
 import Dashboard from "./pages/Dashboard";
 import Tasks from "./pages/Tasks";
 import Tools from "./pages/Tools";
-import Logs from "./pages/Logs";
+import MaintenanceLogs from "./pages/MaintenanceLogs";
 import Knowledge from "./pages/Knowledge";
 import AI from "./pages/AI";
+import ChatList from "./pages/ChatList";
+import PrivateChat from "./pages/PrivateChat";
+import BecomeArtisan from "./pages/BecomeArtisan";
+import Marketplace from "./pages/Marketplace";
+import Applications from "./pages/Applications";
+import PaymentSuccess from "./pages/PaymentSuccess";
+import Wallet from "./pages/Wallet"; // 💰 NEW
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -37,113 +45,105 @@ function Protected({ children }) {
   return children;
 }
 
-// 🚀 Routes Component
+// 🚀 Routes
 function AppRoutes() {
   const { user } = useAuth();
 
-  // 🔔 SAFE FCM INIT (ULTRA STABLE)
+  // 🔔 Notifications
   useEffect(() => {
     let isMounted = true;
 
-    const initFCM = async () => {
+    const init = async () => {
       try {
-        // ✅ Only run in browser
-        if (typeof window === "undefined") return;
-
-        // ✅ Check support
-        if (!("Notification" in window)) {
-          console.log("❌ Notifications not supported");
-          return;
-        }
-
-        // ⚠️ IMPORTANT: Wait for user to exist
-        if (!user) {
-          console.log("⏳ Waiting for user before FCM...");
-          return;
-        }
-
-        // 🔔 Request + Save Token
+        if (!user) return;
         await requestPermission();
-
-        // 🔔 Listen for messages
-        if (isMounted) {
-          listenNotifications();
-        }
-
+        if (isMounted) listenNotifications();
       } catch (err) {
-        console.log("⚠️ FCM skipped safely:", err.message);
+        console.log("Notification error:", err);
       }
     };
 
-    initFCM();
+    init();
+    return () => (isMounted = false);
+  }, [user]);
+
+  // 🟢 Online Presence
+  useEffect(() => {
+    if (!user) return;
+
+    const userRef = doc(db, "users", user.uid);
+
+    const goOnline = () =>
+      updateDoc(userRef, {
+        online: true,
+        lastSeen: serverTimestamp(),
+      }).catch(() => {});
+
+    const goOffline = () =>
+      updateDoc(userRef, {
+        online: false,
+        lastSeen: serverTimestamp(),
+      }).catch(() => {});
+
+    goOnline();
+    window.addEventListener("beforeunload", goOffline);
 
     return () => {
-      isMounted = false;
+      goOffline();
+      window.removeEventListener("beforeunload", goOffline);
     };
-  }, [user]); // ✅ IMPORTANT FIX (runs when user is ready)
+  }, [user]);
 
-  // 🛑 Prevent white screen
   if (user === undefined) {
     return <p style={{ padding: "20px" }}>Loading app...</p>;
   }
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
-      {/* Sidebar */}
       {user && <Sidebar />}
 
-      {/* Main Content */}
       <div
         style={{
           flex: 1,
           padding: "20px",
-          marginLeft: user ? "220px" : "0",
+          marginLeft: user ? "240px" : "0",
         }}
       >
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard" />} />
 
-          {/* Public */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
 
-          {/* Protected */}
-          <Route
-            path="/dashboard"
-            element={<Protected><Dashboard /></Protected>}
-          />
+          <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
+          <Route path="/tasks" element={<Protected><Tasks /></Protected>} />
+          <Route path="/tools" element={<Protected><Tools /></Protected>} />
+          <Route path="/logs" element={<Protected><MaintenanceLogs /></Protected>} />
+          <Route path="/knowledge" element={<Protected><Knowledge /></Protected>} />
+          <Route path="/ai" element={<Protected><AI /></Protected>} />
 
-          <Route
-            path="/tasks"
-            element={<Protected><Tasks /></Protected>}
-          />
+          {/* 💬 CHAT */}
+          <Route path="/chat" element={<Protected><ChatList /></Protected>} />
+          <Route path="/chat/:chatId" element={<Protected><PrivateChat /></Protected>} />
 
-          <Route
-            path="/tools"
-            element={<Protected><Tools /></Protected>}
-          />
+          {/* 🧑‍🔧 MARKETPLACE */}
+          <Route path="/marketplace" element={<Protected><Marketplace /></Protected>} />
+          <Route path="/applications" element={<Protected><Applications /></Protected>} />
 
-          <Route
-            path="/logs"
-            element={<Protected><Logs /></Protected>}
-          />
+          {/* 💰 WALLET */}
+          <Route path="/wallet" element={<Protected><Wallet /></Protected>} />
 
-          <Route
-            path="/knowledge"
-            element={<Protected><Knowledge /></Protected>}
-          />
+          {/* 💳 PAYMENT */}
+          <Route path="/payment-success" element={<PaymentSuccess />} />
 
-          <Route
-            path="/ai"
-            element={<Protected><AI /></Protected>}
-          />
+          <Route path="/become-artisan" element={<Protected><BecomeArtisan /></Protected>} />
         </Routes>
       </div>
     </div>
   );
 }
 
-// 🌍 App Root
+// 🌍 ROOT
 export default function App() {
   return (
     <AuthProvider>

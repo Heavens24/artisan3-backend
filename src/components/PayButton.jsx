@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const PayButton = ({ email, userId }) => {
+const PayButton = ({ job, user }) => {
   const [loading, setLoading] = useState(false);
 
   const payNow = async () => {
@@ -10,22 +10,24 @@ const PayButton = ({ email, userId }) => {
       const res = await fetch("http://localhost:5000/pay", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": "application/json"
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({
+          email: user.email,
+          amount: job.budget
+        })
       });
 
       const data = await res.json();
 
       console.log("💰 PAYSTACK INIT:", data);
 
-      if (data?.data?.authorization_url) {
-        // ✅ SAVE REFERENCE LOCALLY
-        localStorage.setItem("paymentReference", data.data.reference);
-        localStorage.setItem("paymentUserId", userId);
+      if (data?.authorization_url) {
+        // 🔥 SAVE JOB + USER
+        localStorage.setItem("paymentJobId", job.id);
 
-        // ✅ REDIRECT
-        window.location.href = data.data.authorization_url;
+        // 🚀 REDIRECT
+        window.location.href = data.authorization_url;
       } else {
         alert("Payment failed to start");
       }
@@ -40,7 +42,7 @@ const PayButton = ({ email, userId }) => {
 
   return (
     <button onClick={payNow} disabled={loading}>
-      {loading ? "Processing..." : "Upgrade to Pro 💳"}
+      {loading ? "Processing..." : "💰 Pay & Start Job"}
     </button>
   );
 };

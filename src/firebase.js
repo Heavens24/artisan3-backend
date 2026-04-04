@@ -2,8 +2,9 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getMessaging } from "firebase/messaging";
+import { getStorage } from "firebase/storage"; // 🔥 ADD THIS
 
-// 🔥 YOUR CONFIG (UNCHANGED)
+// 🔥 CONFIG
 const firebaseConfig = {
   apiKey: "AIzaSyBmiOVCkHuxN7oNN2i1fGxfWUUHmnVzImo",
   authDomain: "artisan3-0.firebaseapp.com",
@@ -16,7 +17,8 @@ const firebaseConfig = {
 // 🔧 INIT
 const app = initializeApp(firebaseConfig);
 
-// ✅ EXPORTS (IMPORTANT)
+// ✅ EXPORTS
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const messaging = getMessaging(app); // 🔥 THIS LINE FIXES EVERYTHING
+export const messaging = getMessaging(app);
+export const storage = getStorage(app); // 🔥 NEW

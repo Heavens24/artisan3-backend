@@ -1,148 +1,190 @@
 require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const admin = require("firebase-admin");
+const OpenAI = require("openai");
+const Paystack = require("paystack-api");
+const axios = require("axios");
+
+const { admin, db } = require("./firebaseAdmin");
 
 const app = express();
 
 // ============================================
 // ✅ CORS
 // ============================================
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5174"
-  ]
-}));
-
+app.use(cors({ origin: ["http://localhost:5173", "https://yourdomain.com"] }));
 app.use(bodyParser.json());
 
 // ============================================
-// 🔐 FIREBASE ADMIN SETUP (ENV SAFE)
+// 🤖 OPENAI
 // ============================================
-
-if (!process.env.FIREBASE_KEY) {
-  console.error("❌ FIREBASE_KEY is missing");
-  process.exit(1);
-}
-
-let serviceAccount;
-
-try {
-  serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
-} catch (err) {
-  console.error("❌ Invalid FIREBASE_KEY JSON");
-  process.exit(1);
-}
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-const db = admin.firestore();
+// ============================================
+// 💰 PAYSTACK
+// ============================================
+const paystack = Paystack(process.env.PAYSTACK_SECRET_KEY);
 
 // ============================================
-// 🔔 MANUAL NOTIFICATION ROUTE
+// ⚙️ CONFIG
 // ============================================
-app.post("/notify-user", async (req, res) => {
+const COMMISSION_RATE = 0.1;
+const MIN_WITHDRAWAL = 50;
+
+// ============================================
+// 💳 INIT PAYMENT
+// ============================================
+app.post("/pay", async (req, res) => {
+  const { email, amount, userId } = req.body;
+
   try {
-    const { userId, message } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ error: "User ID required" });
-    }
-
-    const userDoc = await db.collection("users").doc(userId).get();
-
-    if (!userDoc.exists) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const { fcmToken } = userDoc.data();
-
-    if (!fcmToken) {
-      return res.status(400).json({ error: "No FCM token" });
-    }
-
-    await admin.messaging().send({
-      notification: {
-        title: "🔔 Artisan3.0 Alert",
-        body: message || "Test notification",
-      },
-      token: fcmToken,
+    const response = await paystack.transaction.initialize({
+      email,
+      amount: amount * 100,
+      callback_url: "https://yourdomain.com/payment-success",
     });
 
-    res.json({ success: true });
+    await db.collection("transactions").doc(response.data.reference).set({
+      userId,
+      amount,
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
+    res.json(response.data);
   } catch (err) {
-    console.error("❌ Notify error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ============================================
-// 🔥 AUTO ALERT SYSTEM
+// ✅ VERIFY PAYMENT
 // ============================================
-setInterval(async () => {
+app.get("/verify/:reference", async (req, res) => {
   try {
-    const now = new Date();
+    const verify = await paystack.transaction.verify({
+      reference: req.params.reference,
+    });
 
-    const snapshot = await db.collection("tasks").get();
-
-    for (const docSnap of snapshot.docs) {
-      const task = docSnap.data();
-
-      if (!task.reminderTime || task.notified) continue;
-
-      const reminderTime = new Date(task.reminderTime);
-
-      if (now >= reminderTime) {
-        const userDoc = await db
-          .collection("users")
-          .doc(task.userId)
-          .get();
-
-        if (!userDoc.exists) continue;
-
-        const { fcmToken } = userDoc.data();
-
-        if (!fcmToken) continue;
-
-        await admin.messaging().send({
-          notification: {
-            title: "⏰ Task Reminder",
-            body: task.title,
-          },
-          token: fcmToken,
-        });
-
-        console.log("🔔 Auto alert sent:", task.title);
-
-        await db.collection("tasks").doc(docSnap.id).update({
-          notified: true,
-        });
-      }
+    if (verify.data.status !== "success") {
+      return res.status(400).json({ error: "Payment failed" });
     }
 
+    await db.runTransaction(async (t) => {
+      const txRef = db.collection("transactions").doc(req.params.reference);
+      const txDoc = await t.get(txRef);
+
+      if (!txDoc.exists) throw new Error("Transaction not found");
+
+      const tx = txDoc.data();
+
+      if (tx.status === "paid") {
+        throw new Error("Already processed");
+      }
+
+      const total = verify.data.amount / 100;
+      const commission = total * COMMISSION_RATE;
+      const earnings = total - commission;
+
+      const walletRef = db.collection("wallets").doc(tx.userId);
+      const walletDoc = await t.get(walletRef);
+
+      if (!walletDoc.exists) {
+        t.set(walletRef, { balance: earnings });
+      } else {
+        t.update(walletRef, {
+          balance: admin.firestore.FieldValue.increment(earnings),
+        });
+      }
+
+      t.update(txRef, {
+        status: "paid",
+        commission,
+        earnings,
+      });
+    });
+
+    res.json({ success: true });
   } catch (err) {
-    console.error("❌ Auto alert error:", err.message);
+    res.status(500).json({ error: err.message });
   }
-}, 30000);
+});
 
 // ============================================
-// 🧪 HEALTH CHECK
+// 💸 WITHDRAW REQUEST
+// ============================================
+app.post("/request-withdrawal", async (req, res) => {
+  const { userId, amount } = req.body;
+
+  if (amount < MIN_WITHDRAWAL) {
+    return res.status(400).json({ error: "Minimum withdrawal is R50" });
+  }
+
+  try {
+    const userDoc = await db.collection("users").doc(userId).get();
+    const walletRef = db.collection("wallets").doc(userId);
+
+    const user = userDoc.data();
+
+    if (!user.recipientCode) {
+      return res.status(400).json({ error: "Add bank details first" });
+    }
+
+    await db.runTransaction(async (t) => {
+      const walletDoc = await t.get(walletRef);
+
+      if (walletDoc.data().balance < amount) {
+        throw new Error("Insufficient funds");
+      }
+
+      t.update(walletRef, {
+        balance: admin.firestore.FieldValue.increment(-amount),
+      });
+
+      t.set(db.collection("withdrawals").doc(), {
+        userId,
+        amount,
+        status: "pending",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================
+// 🤖 AI
+// ============================================
+app.post("/api/ai", async (req, res) => {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages: [
+        {
+          role: "user",
+          content: req.body.prompt || "Analyze issue",
+        },
+      ],
+    });
+
+    res.json({ result: response.choices[0].message.content });
+  } catch {
+    res.status(500).json({ error: "AI failed" });
+  }
+});
+
+// ============================================
+// 🚀 SERVER
 // ============================================
 app.get("/", (req, res) => {
-  res.send("🚀 Artisan3.0 Backend Running");
+  res.send("🔥 Artisan 3.0 Backend LIVE");
 });
 
-// ============================================
-// 🚀 START SERVER
-// ============================================
 const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  console.log(`🚀 Artisan3.0 server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log("🚀 Server running:", PORT));

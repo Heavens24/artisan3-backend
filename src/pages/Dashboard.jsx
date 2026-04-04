@@ -2,73 +2,121 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth, db } from "../firebase";
-import { doc, onSnapshot } from "firebase/firestore";
+import {
+  doc,
+  onSnapshot,
+  collection,
+  query,
+  where
+} from "firebase/firestore";
+
 import PayButton from "../components/PayButton";
+
+// 📊 CHARTS
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell
+} from "recharts";
 
 export default function Dashboard() {
   const { user } = useAuth();
+
   const [userData, setUserData] = useState(null);
+  const [tools, setTools] = useState([]);
+  const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // 🔄 REAL-TIME USER DATA
+  // 🔄 USER DATA
   useEffect(() => {
     if (!user) return;
 
     const ref = doc(db, "users", user.uid);
-
-    const unsub = onSnapshot(ref, (docSnap) => {
+    return onSnapshot(ref, (docSnap) => {
       setUserData(docSnap.data());
       setLoading(false);
     });
-
-    return () => unsub();
   }, [user]);
 
-  // 💰 ✅ SMART PAYMENT VERIFY (LOCALSTORAGE BASED — FIXED)
+  // 🔄 TOOLS
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, "tools"),
+      where("userId", "==", user.uid)
+    );
+
+    return onSnapshot(q, (snapshot) => {
+      setTools(snapshot.docs.map(doc => doc.data()));
+    });
+  }, [user]);
+
+  // 🔄 LOGS
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, "maintenanceLogs"),
+      where("userId", "==", user.uid)
+    );
+
+    return onSnapshot(q, (snapshot) => {
+      setLogs(snapshot.docs.map(doc => doc.data()));
+    });
+  }, [user]);
+
+  // 💰 PAYMENT VERIFY (UNCHANGED)
   useEffect(() => {
     if (!user) return;
 
     const verifyPayment = async () => {
-      const storedRef = localStorage.getItem("paymentReference");
-      const storedUser = localStorage.getItem("paymentUserId");
+      const ref = localStorage.getItem("paymentReference");
+      const uid = localStorage.getItem("paymentUserId");
 
-      if (!storedRef || !storedUser) return;
-
-      console.log("🔍 Verifying stored payment...");
+      if (!ref || !uid) return;
 
       try {
         const res = await fetch("http://localhost:5000/verify-payment", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            reference: storedRef,
-            userId: storedUser,
-          }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reference: ref, userId: uid }),
         });
 
         const data = await res.json();
 
         if (data.success) {
           alert("🎉 You are now PRO!");
-
-          // ✅ CLEAN STORAGE
-          localStorage.removeItem("paymentReference");
-          localStorage.removeItem("paymentUserId");
-
+          localStorage.clear();
           window.location.reload();
-        } else {
-          console.log("⚠️ Payment not verified yet");
         }
-
       } catch (err) {
-        console.error("❌ Verify error:", err);
+        console.error(err);
       }
     };
 
     verifyPayment();
   }, [user]);
+
+  // 📊 ANALYTICS DATA
+  const completed = logs.filter(l => l.status === "completed").length;
+  const pending = logs.length - completed;
+
+  const jobData = [
+    { name: "Completed", value: completed },
+    { name: "Pending", value: pending }
+  ];
+
+  const toolData = tools.map(t => ({
+    name: t.name,
+    uses: t.totalUses || 0
+  }));
 
   // 🔐 LOGOUT
   const logout = async () => {
@@ -76,91 +124,105 @@ export default function Dashboard() {
   };
 
   if (!user || loading) {
-    return <p style={{ padding: "30px", color: "white" }}>Loading...</p>;
+    return <p style={{ padding: 30, color: "white" }}>Loading...</p>;
   }
 
   return (
-    <div style={{ padding: "30px", color: "white" }}>
-      
-      {/* 👋 HEADER */}
+    <div style={{ padding: 30, color: "white" }}>
+
       <h1>👋 Welcome</h1>
       <p>{user.email}</p>
 
-      {/* 💎 SUBSCRIPTION */}
-      <div
-        style={{
-          marginTop: "20px",
-          padding: "20px",
-          background: "#1e293b",
-          borderRadius: "10px",
-        }}
-      >
+      {/* 💎 SUB */}
+      <div style={card}>
         <h3>💎 Subscription</h3>
 
         <p>
           {userData?.isPro
-            ? "💎 Pro Plan — Unlimited Access"
+            ? "💎 Pro Plan — Unlimited"
             : "Free Plan"}
         </p>
 
-        <p style={{ marginTop: "10px" }}>
-          AI Usage:{" "}
-          {userData?.isPro
-            ? "Unlimited ♾️"
-            : `${userData?.usageCount || 0}/3 used`}
-        </p>
-
         {!userData?.isPro && (
-          <div style={{ marginTop: "15px" }}>
-            {/* ✅ FIXED: PASS userId */}
-            <PayButton email={user.email} userId={user.uid} />
-          </div>
+          <PayButton email={user.email} userId={user.uid} amount={50} />
         )}
       </div>
 
-      {/* 🔧 FEATURE */}
-      <div
-        style={{
-          marginTop: "20px",
-          padding: "20px",
-          background: "#0f172a",
-          borderRadius: "10px",
-        }}
-      >
+      {/* 📊 CHARTS */}
+      <h2 style={{ marginTop: 30 }}>📊 Analytics</h2>
+
+      {/* 🟦 TOOL USAGE BAR */}
+      <div style={card}>
+        <h3>🧰 Tool Usage</h3>
+
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={toolData}>
+            <XAxis dataKey="name" />
+            <YAxis />
+            <Tooltip />
+            <Bar dataKey="uses" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* 🟣 JOB STATUS PIE */}
+      <div style={{ ...card, marginTop: 20 }}>
+        <h3>📋 Job Status</h3>
+
+        <ResponsiveContainer width="100%" height={300}>
+          <PieChart>
+            <Pie
+              data={jobData}
+              dataKey="value"
+              nameKey="name"
+              outerRadius={100}
+              label
+            >
+              {jobData.map((entry, index) => (
+                <Cell key={index} />
+              ))}
+            </Pie>
+            <Tooltip />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* 🔧 FEATURE LOCK */}
+      <div style={{ ...card, marginTop: 20 }}>
         <h3>🔧 Instant Repair Assistant</h3>
 
         <p>
-          Status:{" "}
           {userData?.isPro
-            ? "✅ Unlimited Access"
-            : (userData?.usageCount || 0) < 3
-              ? "🟡 Limited Free Access"
-              : "🔒 Locked"}
+            ? "✅ Unlimited"
+            : "🔒 Upgrade to unlock"}
         </p>
 
         {!userData?.isPro && (
-          <div style={{ marginTop: "10px" }}>
-            {/* ✅ FIXED HERE TOO */}
-            <PayButton email={user.email} userId={user.uid} />
-          </div>
+          <PayButton email={user.email} userId={user.uid} amount={50} />
         )}
       </div>
 
-      {/* 🚪 LOGOUT */}
-      <button
-        onClick={logout}
-        style={{
-          marginTop: "30px",
-          padding: "10px",
-          background: "red",
-          border: "none",
-          borderRadius: "6px",
-          color: "white",
-          cursor: "pointer",
-        }}
-      >
+      <button onClick={logout} style={logoutBtn}>
         Logout
       </button>
     </div>
   );
 }
+
+// 🎨 STYLES
+const card = {
+  background: "#1e293b",
+  padding: "20px",
+  borderRadius: "10px",
+  marginTop: "20px"
+};
+
+const logoutBtn = {
+  marginTop: "30px",
+  padding: "10px",
+  background: "red",
+  border: "none",
+  borderRadius: "6px",
+  color: "white",
+  cursor: "pointer"
+};
