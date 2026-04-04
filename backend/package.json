@@ -1,20 +1,35 @@
 {
-  "name": "backend",
+  "name": "artisan3-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Artisan 3.0 Backend (AI + Payments + Wallet + Withdrawals)",
+  "main": "server.js",
+  "type": "commonjs",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
-  "keywords": [],
+  "keywords": [
+    "artisan",
+    "marketplace",
+    "payments",
+    "firebase",
+    "ai",
+    "wallet",
+    "paystack"
+  ],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
+    "axios": "^1.7.2",
     "body-parser": "^2.2.2",
-    "cors": "^2.8.6",
+    "cors": "^2.8.5",
     "dotenv": "^17.3.1",
-    "express": "^5.2.1",
-    "firebase-admin": "^10.3.0"
+    "express": "^4.19.2",
+    "firebase-admin": "^12.0.0",
+    "openai": "^6.3.3",
+    "paystack-api": "^2.0.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
   }
 }
