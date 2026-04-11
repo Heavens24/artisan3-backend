@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
+import {
+  doc,
+  onSnapshot,
+  updateDoc,
+  addDoc,
+  collection,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 
@@ -13,8 +21,14 @@ export default function Wallet() {
 
     const ref = doc(db, "wallets", user.uid);
 
-    const unsub = onSnapshot(ref, (snap) => {
-      if (snap.exists()) {
+    const unsub = onSnapshot(ref, async (snap) => {
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          balance: 0,
+          pending: 0,
+          createdAt: serverTimestamp(),
+        });
+      } else {
         setWallet(snap.data());
       }
     });
@@ -27,22 +41,20 @@ export default function Wallet() {
       return alert("❌ No funds available");
     }
 
-    const amount = wallet.balance;
-
     try {
       setLoading(true);
 
-      // 🔒 LOCK FUNDS (important)
+      const amount = wallet.balance;
+
       await updateDoc(doc(db, "wallets", user.uid), {
-        balance: 0
+        balance: 0,
       });
 
-      // 🧾 CREATE WITHDRAWAL REQUEST
       await addDoc(collection(db, "withdrawals"), {
         userId: user.uid,
         amount,
         status: "pending",
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
       });
 
       alert("💸 Withdrawal request submitted!");
@@ -55,47 +67,34 @@ export default function Wallet() {
   };
 
   return (
-    <div style={styles.container}>
-      <h2>💰 My Wallet</h2>
+    <div className="min-h-screen text-white p-6">
+      <h1 className="text-3xl font-bold mb-6">💰 My Wallet</h1>
 
-      <div style={styles.card}>
-        <h3>Available Balance</h3>
-        <p>R{wallet.balance || 0}</p>
+      <div className="grid md:grid-cols-2 gap-6">
+
+        <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
+          <p className="text-gray-400 text-sm">Available Balance</p>
+          <h2 className="text-4xl font-bold text-green-400 mt-2">
+            R {wallet.balance || 0}
+          </h2>
+
+          <button
+            onClick={handleWithdraw}
+            disabled={loading || wallet.balance <= 0}
+            className="mt-4 w-full bg-green-500 py-3 rounded-xl hover:bg-green-600 transition disabled:bg-gray-600"
+          >
+            {loading ? "Processing..." : "💸 Withdraw"}
+          </button>
+        </div>
+
+        <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
+          <p className="text-gray-400 text-sm">Pending Earnings</p>
+          <h2 className="text-3xl font-semibold text-yellow-400 mt-2">
+            R {wallet.pending || 0}
+          </h2>
+        </div>
+
       </div>
-
-      <div style={styles.card}>
-        <h3>Pending Earnings</h3>
-        <p>R{wallet.pending || 0}</p>
-      </div>
-
-      <button
-        onClick={handleWithdraw}
-        disabled={loading}
-        style={styles.button}
-      >
-        {loading ? "Processing..." : "💸 Withdraw"}
-      </button>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    padding: "20px",
-    color: "#fff"
-  },
-  card: {
-    background: "#1a1a1a",
-    padding: "20px",
-    marginBottom: "10px",
-    borderRadius: "10px"
-  },
-  button: {
-    padding: "12px",
-    background: "#00ffcc",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    fontWeight: "bold"
-  }
-};

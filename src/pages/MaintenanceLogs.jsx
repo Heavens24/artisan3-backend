@@ -19,9 +19,10 @@ export default function MaintenanceLogs() {
 
   const [title, setTitle] = useState("");
   const [tool, setTool] = useState("");
+  const [type, setType] = useState("preventative");
+  const [intervalDays, setIntervalDays] = useState(30);
   const [logs, setLogs] = useState([]);
 
-  // 🔄 REAL-TIME LISTENER (NO INDEX NEEDED)
   useEffect(() => {
     if (!user?.uid) return;
 
@@ -30,159 +31,138 @@ export default function MaintenanceLogs() {
       where("userId", "==", user.uid)
     );
 
-    const unsub = onSnapshot(
-      q,
-      (snapshot) => {
-        const data = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data()
-        }));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+      }));
 
-        // 🔥 Sort manually (no Firestore index needed)
-        data.sort((a, b) => {
-          const aTime = a.createdAt?.seconds || 0;
-          const bTime = b.createdAt?.seconds || 0;
-          return bTime - aTime;
-        });
-
-        setLogs(data);
-      },
-      (error) => {
-        console.error("Snapshot error:", error);
-      }
-    );
+      data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setLogs(data);
+    });
 
     return () => unsub();
   }, [user]);
 
-  // ➕ ADD LOG (WITH TOOL LINK)
+  const calculateNextDate = () => {
+    const now = new Date();
+    now.setDate(now.getDate() + Number(intervalDays || 0));
+    return now;
+  };
+
   const addLog = async () => {
-    if (!title.trim()) return alert("Enter log");
+    if (!title.trim()) return;
 
-    try {
-      await addDoc(collection(db, "maintenance_logs"), {
-        title: title.trim(),
-        tool: tool || "General",
-        status: "pending",
-        userId: user.uid,
-        createdAt: serverTimestamp()
-      });
+    await addDoc(collection(db, "maintenance_logs"), {
+      title,
+      tool: tool || "General",
+      type,
+      intervalDays: type === "preventative" ? intervalDays : null,
+      nextMaintenance: type === "preventative" ? calculateNextDate() : null,
+      status: "pending",
+      userId: user.uid,
+      createdAt: serverTimestamp()
+    });
 
-      setTitle("");
-      setTool("");
-    } catch (err) {
-      console.error(err);
-      alert("Failed to add log");
-    }
+    setTitle("");
+    setTool("");
   };
 
-  // ✏️ EDIT
-  const editLog = async (log) => {
-    const newTitle = prompt("Edit log", log.title);
-    if (!newTitle) return;
-
-    try {
-      await updateDoc(doc(db, "maintenance_logs", log.id), {
-        title: newTitle.trim()
-      });
-    } catch (err) {
-      console.error(err);
-      alert("Edit failed");
-    }
-  };
-
-  // ✅ MARK DONE
   const markDone = async (log) => {
-    try {
-      await updateDoc(doc(db, "maintenance_logs", log.id), {
-        status: "done"
-      });
-    } catch (err) {
-      console.error(err);
-      alert("Update failed");
-    }
+    const nextDate =
+      log.type === "preventative"
+        ? new Date(new Date().setDate(new Date().getDate() + log.intervalDays))
+        : null;
+
+    await updateDoc(doc(db, "maintenance_logs", log.id), {
+      status: "done",
+      completedAt: new Date(),
+      nextMaintenance: nextDate
+    });
   };
 
-  // 🔁 UNDO
-  const markPending = async (log) => {
-    try {
-      await updateDoc(doc(db, "maintenance_logs", log.id), {
-        status: "pending"
-      });
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // 🗑 DELETE
   const deleteLog = async (id) => {
     if (!window.confirm("Delete log?")) return;
-
-    try {
-      await deleteDoc(doc(db, "maintenance_logs", id));
-    } catch (err) {
-      console.error(err);
-      alert("Delete failed");
-    }
+    await deleteDoc(doc(db, "maintenance_logs", id));
   };
 
-  // 🕒 FORMAT TIME
-  const formatDate = (ts) => {
-    if (!ts?.seconds) return "Now";
-    return new Date(ts.seconds * 1000).toLocaleString();
+  const formatDate = (date) => {
+    if (!date) return "-";
+    return new Date(date.seconds ? date.seconds * 1000 : date).toLocaleDateString();
+  };
+
+  const isDueSoon = (date) => {
+    if (!date) return false;
+    const d = new Date(date.seconds ? date.seconds * 1000 : date);
+    const diff = (d - new Date()) / (1000 * 60 * 60 * 24);
+    return diff <= 3;
   };
 
   return (
-    <div style={styles.container}>
-      <h2>🛠 Maintenance Logs</h2>
+    <div className="p-6 text-white">
+      <h2 className="text-2xl font-bold mb-4">🛠 Maintenance Logs</h2>
 
-      {/* ADD FORM */}
-      <div style={styles.form}>
+      {/* FORM */}
+      <div className="grid md:grid-cols-5 gap-2 mb-6">
         <input
-          placeholder="Task..."
+          placeholder="Task"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          style={styles.input}
+          className="p-2 bg-slate-800 rounded"
         />
 
         <input
-          placeholder="Tool (optional)"
+          placeholder="Tool"
           value={tool}
           onChange={(e) => setTool(e.target.value)}
-          style={styles.input}
+          className="p-2 bg-slate-800 rounded"
         />
 
-        <button onClick={addLog} style={styles.btn}>
-          ➕ Add
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+          className="p-2 bg-slate-800 rounded"
+        >
+          <option value="preventative">Preventative</option>
+          <option value="breakdown">Breakdown</option>
+        </select>
+
+        {type === "preventative" && (
+          <input
+            type="number"
+            placeholder="Days"
+            value={intervalDays}
+            onChange={(e) => setIntervalDays(e.target.value)}
+            className="p-2 bg-slate-800 rounded"
+          />
+        )}
+
+        <button onClick={addLog} className="bg-blue-600 rounded p-2">
+          Add
         </button>
       </div>
 
-      {/* LIST */}
-      {logs.length === 0 && <p>No logs yet...</p>}
-
+      {/* LOGS */}
       {logs.map((log) => (
-        <div key={log.id} style={styles.card}>
-          <h3
-            style={{
-              textDecoration:
-                log.status === "done" ? "line-through" : "none"
-            }}
-          >
-            {log.title}
-          </h3>
+        <div
+          key={log.id}
+          className="bg-slate-800 p-4 mb-3 rounded-lg border border-slate-700"
+        >
+          <h3 className="font-semibold">{log.title}</h3>
 
-          <p>🧰 Tool: {log.tool || "General"}</p>
+          <p>🧰 {log.tool}</p>
+          <p>📌 Type: {log.type}</p>
           <p>Status: {log.status}</p>
-          <p>{formatDate(log.createdAt)}</p>
 
-          <div style={styles.actions}>
-            {log.status !== "done" ? (
-              <button onClick={() => markDone(log)}>✅ Done</button>
-            ) : (
-              <button onClick={() => markPending(log)}>🔁 Undo</button>
-            )}
+          <p>
+            📅 Next:{" "}
+            <span className={isDueSoon(log.nextMaintenance) ? "text-red-400" : ""}>
+              {formatDate(log.nextMaintenance)}
+            </span>
+          </p>
 
-            <button onClick={() => editLog(log)}>✏️</button>
+          <div className="flex gap-2 mt-2">
+            <button onClick={() => markDone(log)}>✅ Done</button>
             <button onClick={() => deleteLog(log.id)}>🗑</button>
           </div>
         </div>
@@ -190,42 +170,3 @@ export default function MaintenanceLogs() {
     </div>
   );
 }
-
-const styles = {
-  container: {
-    padding: "20px",
-    color: "#fff",
-    background: "#0f1115",
-    minHeight: "100vh"
-  },
-  form: {
-    display: "flex",
-    gap: "10px",
-    marginBottom: "20px"
-  },
-  input: {
-    padding: "10px",
-    background: "#1f2229",
-    border: "1px solid #333",
-    color: "#fff",
-    borderRadius: "6px"
-  },
-  btn: {
-    background: "#3b82f6",
-    border: "none",
-    padding: "10px",
-    borderRadius: "6px",
-    color: "#fff"
-  },
-  card: {
-    background: "#1a1a1a",
-    padding: "15px",
-    marginBottom: "10px",
-    borderRadius: "8px"
-  },
-  actions: {
-    marginTop: "10px",
-    display: "flex",
-    gap: "10px"
-  }
-};

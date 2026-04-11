@@ -4,20 +4,25 @@ import {
   onSnapshot,
   doc,
   updateDoc,
-  getDoc
+  getDoc,
+  addDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { useAuth } from "../context/AuthContext";
 import PayButton from "../components/PayButton";
+import { notifySuccess, notifyError } from "../components/NotificationProvider";
 
 export default function Marketplace() {
+  const { user } = useAuth();
   const [jobs, setJobs] = useState([]);
 
+  // 🔥 LIVE JOBS
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "jobs"), (snapshot) => {
       setJobs(
         snapshot.docs.map((doc) => ({
           id: doc.id,
-          ...doc.data()
+          ...doc.data(),
         }))
       );
     });
@@ -25,70 +30,108 @@ export default function Marketplace() {
     return () => unsub();
   }, []);
 
+  // 🧑‍🔧 APPLY FOR JOB
+  const applyForJob = async (job) => {
+    try {
+      await addDoc(collection(db, "applications"), {
+        jobId: job.id,
+        artisanId: user.uid,
+        status: "pending",
+        createdAt: new Date(),
+      });
+
+      notifySuccess("Applied successfully 🚀");
+    } catch (err) {
+      notifyError("Application failed");
+    }
+  };
+
+  // 💸 RELEASE PAYMENT
   const releasePayment = async (job) => {
     try {
       const artisanRef = doc(db, "wallets", job.artisanId);
       const walletSnap = await getDoc(artisanRef);
 
       if (walletSnap.exists()) {
-        const current = walletSnap.data();
+        const data = walletSnap.data();
 
         await updateDoc(artisanRef, {
-          pending: Math.max(
-            0,
-            (current.pending || 0) - (job.artisanAmount || 0)
-          ),
-          balance:
-            (current.balance || 0) + (job.artisanAmount || 0)
+          pending: Math.max(0, (data.pending || 0) - job.artisanAmount),
+          balance: (data.balance || 0) + job.artisanAmount,
         });
       }
 
       await updateDoc(doc(db, "jobs", job.id), {
         status: "done",
-        completedAt: new Date()
+        paid: true,
       });
 
-      alert("💸 Payment released to artisan!");
+      notifySuccess("Payment released 💸");
     } catch (err) {
-      console.error(err);
-      alert("Error releasing payment");
+      notifyError("Payment failed");
     }
   };
 
   return (
-    <div style={{ padding: "20px", color: "#fff" }}>
-      <h2>Marketplace</h2>
+    <div className="p-6 text-white">
+      <h2 className="text-2xl font-bold mb-6">💼 Marketplace</h2>
+
+      {jobs.length === 0 && <p>No jobs available</p>}
 
       {jobs.map((job) => (
         <div
           key={job.id}
-          style={{
-            border: "1px solid #333",
-            padding: "15px",
-            marginBottom: "10px"
-          }}
+          className="bg-slate-800 p-5 mb-4 rounded-xl shadow"
         >
-          <h3>{job.title}</h3>
-          <p>Budget: R{job.budget}</p>
-          <p>Status: {job.status}</p>
+          <h3 className="font-bold text-lg">{job.title}</h3>
 
-          {/* 💳 Payment */}
+          <p className="text-sm opacity-80 mt-1">
+            {job.description || "No description"}
+          </p>
+
+          <div className="mt-3 space-y-1">
+            <p>💰 Budget: R{job.budget}</p>
+            <p>📌 Type: {job.type}</p>
+            <p>📍 Location: {job.location || "N/A"}</p>
+            <p>
+              Status:{" "}
+              <span className="font-semibold">{job.status}</span>
+            </p>
+          </div>
+
+          {/* 🟢 APPLY */}
+          {job.status === "open" && (
+            <button
+              onClick={() => applyForJob(job)}
+              className="mt-3 bg-green-600 px-4 py-2 rounded hover:bg-green-700"
+            >
+              Apply
+            </button>
+          )}
+
+          {/* 💳 PAYMENT */}
           {job.status === "assigned" && !job.paid && (
-            <PayButton job={job} />
+            <div className="mt-3">
+              <PayButton job={job} />
+            </div>
           )}
 
-          {/* 🚧 In Progress */}
+          {/* 🛠 IN PROGRESS */}
           {job.status === "in_progress" && (
-            <>
-              <p>🚧 Work in progress...</p>
-              <button onClick={() => releasePayment(job)}>
-                💸 Release Payment
-              </button>
-            </>
+            <button
+              onClick={() => releasePayment(job)}
+              className="mt-3 bg-yellow-500 px-4 py-2 rounded"
+            >
+              Release Payment
+            </button>
           )}
 
-          {/* ✅ Done */}
-          {job.status === "done" && <p>✅ Completed</p>}
+          {/* ✅ DONE */}
+          {job.status === "done" && (
+            <p className="mt-3 text-green-400 font-semibold">
+              ✅ Completed
+            </p>
+          )}
         </div>
       ))}
     </div>

@@ -1,15 +1,25 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { AuthProvider, useAuth } from "./context/AuthContext";
-import Sidebar from "./components/Sidebar";
+import Layout from "./components/Layout";
+import NotificationProvider, {
+  notifyInfo,
+} from "./components/NotificationProvider";
 
 import {
   requestPermission,
   listenNotifications,
 } from "./firebase-messaging";
 
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import {
+  doc,
+  updateDoc,
+  serverTimestamp,
+  collection,
+  onSnapshot,
+} from "firebase/firestore";
+
 import { db } from "./firebase";
 
 // Pages
@@ -25,17 +35,24 @@ import BecomeArtisan from "./pages/BecomeArtisan";
 import Marketplace from "./pages/Marketplace";
 import Applications from "./pages/Applications";
 import PaymentSuccess from "./pages/PaymentSuccess";
-import Wallet from "./pages/Wallet"; // 💰 NEW
+import Wallet from "./pages/Wallet";
+import Admin from "./pages/Admin"; // 🧑‍💼 NEW
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 
-// 🔐 Protected Route
+// 🔊 SOUND
+const playSound = () => {
+  const audio = new Audio("/notify.mp3");
+  audio.play().catch(() => {});
+};
+
+// 🔐 NORMAL PROTECTED
 function Protected({ children }) {
   const { user } = useAuth();
 
   if (user === undefined) {
-    return <p style={{ padding: "20px" }}>Loading...</p>;
+    return <p className="p-6 text-white">Loading...</p>;
   }
 
   if (!user) {
@@ -45,18 +62,41 @@ function Protected({ children }) {
   return children;
 }
 
-// 🚀 Routes
-function AppRoutes() {
+// 🧑‍💼 ADMIN PROTECTED (NEW 🔥)
+function AdminProtected({ children }) {
   const { user } = useAuth();
 
-  // 🔔 Notifications
+  if (user === undefined) {
+    return <p className="p-6 text-white">Loading...</p>;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // ⚠️ Safe fallback
+  if (!user.role || user.role !== "admin") {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+}
+
+// 🚀 ROUTES
+function AppRoutes() {
+  const { user } = useAuth();
+  const triggeredReminders = useRef(new Set());
+
+  // 🔔 PUSH NOTIFICATIONS
   useEffect(() => {
     let isMounted = true;
 
     const init = async () => {
       try {
         if (!user) return;
+
         await requestPermission();
+
         if (isMounted) listenNotifications();
       } catch (err) {
         console.log("Notification error:", err);
@@ -67,7 +107,7 @@ function AppRoutes() {
     return () => (isMounted = false);
   }, [user]);
 
-  // 🟢 Online Presence
+  // 🟢 ONLINE PRESENCE
   useEffect(() => {
     if (!user) return;
 
@@ -94,52 +134,93 @@ function AppRoutes() {
     };
   }, [user]);
 
+  // 🔥 SMART REMINDERS
+  useEffect(() => {
+    if (!user) return;
+
+    const q = collection(db, "maintenance_logs");
+
+    const unsub = onSnapshot(q, (snapshot) => {
+      snapshot.docs.forEach((docItem) => {
+        const log = docItem.data();
+
+        if (!log.nextMaintenance) return;
+
+        const id = docItem.id;
+
+        const next = new Date(
+          log.nextMaintenance.seconds * 1000
+        );
+
+        const diff =
+          (next - new Date()) / (1000 * 60 * 60 * 24);
+
+        if (diff <= 1 && diff > 0 && !triggeredReminders.current.has(id)) {
+          triggeredReminders.current.add(id);
+
+          notifyInfo(`🔧 Maintenance due: ${log.title}`);
+          playSound();
+        }
+      });
+    });
+
+    return () => unsub();
+  }, [user]);
+
   if (user === undefined) {
-    return <p style={{ padding: "20px" }}>Loading app...</p>;
+    return <p className="p-6 text-white">Loading app...</p>;
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      {user && <Sidebar />}
+    <Routes>
+      {/* DEFAULT */}
+      <Route path="/" element={<Navigate to="/dashboard" />} />
 
-      <div
-        style={{
-          flex: 1,
-          padding: "20px",
-          marginLeft: user ? "240px" : "0",
-        }}
-      >
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" />} />
+      {/* AUTH */}
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
 
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+      {/* PROTECTED ROUTES */}
+      {[
+        ["/dashboard", <Dashboard />],
+        ["/tasks", <Tasks />],
+        ["/tools", <Tools />],
+        ["/logs", <MaintenanceLogs />],
+        ["/knowledge", <Knowledge />],
+        ["/ai", <AI />],
+        ["/chat", <ChatList />],
+        ["/chat/:chatId", <PrivateChat />],
+        ["/marketplace", <Marketplace />],
+        ["/applications", <Applications />],
+        ["/wallet", <Wallet />],
+        ["/become-artisan", <BecomeArtisan />],
+      ].map(([path, component]) => (
+        <Route
+          key={path}
+          path={path}
+          element={
+            <Protected>
+              <Layout>{component}</Layout>
+            </Protected>
+          }
+        />
+      ))}
 
-          <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
-          <Route path="/tasks" element={<Protected><Tasks /></Protected>} />
-          <Route path="/tools" element={<Protected><Tools /></Protected>} />
-          <Route path="/logs" element={<Protected><MaintenanceLogs /></Protected>} />
-          <Route path="/knowledge" element={<Protected><Knowledge /></Protected>} />
-          <Route path="/ai" element={<Protected><AI /></Protected>} />
+      {/* 🧑‍💼 ADMIN ROUTE (NEW 🔥) */}
+      <Route
+        path="/admin"
+        element={
+          <AdminProtected>
+            <Layout>
+              <Admin />
+            </Layout>
+          </AdminProtected>
+        }
+      />
 
-          {/* 💬 CHAT */}
-          <Route path="/chat" element={<Protected><ChatList /></Protected>} />
-          <Route path="/chat/:chatId" element={<Protected><PrivateChat /></Protected>} />
-
-          {/* 🧑‍🔧 MARKETPLACE */}
-          <Route path="/marketplace" element={<Protected><Marketplace /></Protected>} />
-          <Route path="/applications" element={<Protected><Applications /></Protected>} />
-
-          {/* 💰 WALLET */}
-          <Route path="/wallet" element={<Protected><Wallet /></Protected>} />
-
-          {/* 💳 PAYMENT */}
-          <Route path="/payment-success" element={<PaymentSuccess />} />
-
-          <Route path="/become-artisan" element={<Protected><BecomeArtisan /></Protected>} />
-        </Routes>
-      </div>
-    </div>
+      {/* 💳 PAYMENT */}
+      <Route path="/payment-success" element={<PaymentSuccess />} />
+    </Routes>
   );
 }
 
@@ -148,6 +229,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <NotificationProvider />
         <AppRoutes />
       </BrowserRouter>
     </AuthProvider>

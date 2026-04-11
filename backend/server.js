@@ -1,190 +1,231 @@
-require("dotenv").config();
+// ============================================
+// 🔐 LOAD ENV (BULLETPROOF)
+// ============================================
+require("dotenv").config({
+  path: require("path").resolve(__dirname, ".env"),
+});
+
 const express = require("express");
 const cors = require("cors");
-const bodyParser = require("body-parser");
-const OpenAI = require("openai");
-const Paystack = require("paystack-api");
-const axios = require("axios");
-
+const fetch = require("node-fetch");
 const { admin, db } = require("./firebaseAdmin");
 
 const app = express();
 
 // ============================================
-// ✅ CORS
+// ✅ GLOBAL SAFETY (NO CRASHES EVER 🔥)
 // ============================================
-app.use(cors({ origin: ["http://localhost:5173", "https://yourdomain.com"] }));
-app.use(bodyParser.json());
+process.on("uncaughtException", (err) => {
+  console.error("💥 UNCAUGHT EXCEPTION:", err);
+});
 
-// ============================================
-// 🤖 OPENAI
-// ============================================
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+process.on("unhandledRejection", (err) => {
+  console.error("💥 UNHANDLED REJECTION:", err);
 });
 
 // ============================================
-// 💰 PAYSTACK
+// ✅ MIDDLEWARE
 // ============================================
-const paystack = Paystack(process.env.PAYSTACK_SECRET_KEY);
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  })
+);
+
+app.use(express.json());
 
 // ============================================
-// ⚙️ CONFIG
+// 🔍 ENV DEBUG
 // ============================================
-const COMMISSION_RATE = 0.1;
-const MIN_WITHDRAWAL = 50;
+console.log("🧪 ENV TEST:", process.env.PAYSTACK_SECRET_KEY);
+
+if (!process.env.PAYSTACK_SECRET_KEY) {
+  console.error("❌ PAYSTACK_SECRET_KEY NOT FOUND");
+} else {
+  console.log(
+    "🔑 PAYSTACK KEY LOADED:",
+    process.env.PAYSTACK_SECRET_KEY.slice(0, 10) + "..."
+  );
+}
 
 // ============================================
-// 💳 INIT PAYMENT
+// 🧪 TEST ROUTE
+// ============================================
+app.get("/test", (req, res) => {
+  res.json({ message: "Backend working ✅" });
+});
+
+// ============================================
+// 💳 PAYMENT ROUTE
 // ============================================
 app.post("/pay", async (req, res) => {
-  const { email, amount, userId } = req.body;
-
   try {
-    const response = await paystack.transaction.initialize({
-      email,
-      amount: amount * 100,
-      callback_url: "https://yourdomain.com/payment-success",
-    });
+    console.log("🚀 Incoming payment request:", req.body);
 
-    await db.collection("transactions").doc(response.data.reference).set({
+    const { email, amount, userId, jobId } = req.body;
+
+    // ✅ VALIDATION
+    if (!email || !amount || !userId) {
+      return res.status(400).json({
+        status: false,
+        error: "Missing required fields",
+      });
+    }
+
+    // ✅ PAYSTACK CALL
+    const paystackRes = await fetch(
+      "https://api.paystack.co/transaction/initialize",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY.trim()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          amount: Number(amount) * 100,
+          callback_url: "http://localhost:5173/payment-success",
+          metadata: {
+            userId,
+            jobId: jobId || "subscription",
+          },
+        }),
+      }
+    );
+
+    const data = await paystackRes.json();
+
+    console.log("💳 PAYSTACK INIT:", data.status);
+
+    if (!data.status) {
+      return res.status(400).json({
+        status: false,
+        error: data.message,
+      });
+    }
+
+    const { authorization_url, reference } = data.data;
+
+    // ✅ SAVE TRANSACTION
+    await db.collection("transactions").doc(reference).set({
       userId,
+      email,
       amount,
+      reference,
       status: "pending",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    res.json(response.data);
+    console.log("✅ Transaction saved:", reference);
+
+    return res.json({
+      status: true,
+      authorization_url,
+      reference,
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("💥 PAY ERROR:", err.message);
+
+    return res.status(500).json({
+      status: false,
+      error: "Internal server error",
+    });
   }
 });
 
 // ============================================
-// ✅ VERIFY PAYMENT
+// 🔍 VERIFY ROUTE (🔥 CRITICAL)
 // ============================================
 app.get("/verify/:reference", async (req, res) => {
   try {
-    const verify = await paystack.transaction.verify({
-      reference: req.params.reference,
-    });
+    const { reference } = req.params;
 
-    if (verify.data.status !== "success") {
-      return res.status(400).json({ error: "Payment failed" });
-    }
+    console.log("🔍 VERIFY HIT:", reference);
 
-    await db.runTransaction(async (t) => {
-      const txRef = db.collection("transactions").doc(req.params.reference);
-      const txDoc = await t.get(txRef);
-
-      if (!txDoc.exists) throw new Error("Transaction not found");
-
-      const tx = txDoc.data();
-
-      if (tx.status === "paid") {
-        throw new Error("Already processed");
-      }
-
-      const total = verify.data.amount / 100;
-      const commission = total * COMMISSION_RATE;
-      const earnings = total - commission;
-
-      const walletRef = db.collection("wallets").doc(tx.userId);
-      const walletDoc = await t.get(walletRef);
-
-      if (!walletDoc.exists) {
-        t.set(walletRef, { balance: earnings });
-      } else {
-        t.update(walletRef, {
-          balance: admin.firestore.FieldValue.increment(earnings),
-        });
-      }
-
-      t.update(txRef, {
-        status: "paid",
-        commission,
-        earnings,
-      });
-    });
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================
-// 💸 WITHDRAW REQUEST
-// ============================================
-app.post("/request-withdrawal", async (req, res) => {
-  const { userId, amount } = req.body;
-
-  if (amount < MIN_WITHDRAWAL) {
-    return res.status(400).json({ error: "Minimum withdrawal is R50" });
-  }
-
-  try {
-    const userDoc = await db.collection("users").doc(userId).get();
-    const walletRef = db.collection("wallets").doc(userId);
-
-    const user = userDoc.data();
-
-    if (!user.recipientCode) {
-      return res.status(400).json({ error: "Add bank details first" });
-    }
-
-    await db.runTransaction(async (t) => {
-      const walletDoc = await t.get(walletRef);
-
-      if (walletDoc.data().balance < amount) {
-        throw new Error("Insufficient funds");
-      }
-
-      t.update(walletRef, {
-        balance: admin.firestore.FieldValue.increment(-amount),
-      });
-
-      t.set(db.collection("withdrawals").doc(), {
-        userId,
-        amount,
-        status: "pending",
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    });
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================
-// 🤖 AI
-// ============================================
-app.post("/api/ai", async (req, res) => {
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages: [
-        {
-          role: "user",
-          content: req.body.prompt || "Analyze issue",
+    const verifyRes = await fetch(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY.trim()}`,
         },
-      ],
+      }
+    );
+
+    const data = await verifyRes.json();
+
+    console.log("🔍 PAYSTACK VERIFY:", JSON.stringify(data, null, 2));
+
+    // ❌ FAILED PAYMENT
+    if (!data.status || data.data.status !== "success") {
+      return res.status(400).json({
+        success: false,
+        error: "Payment not successful",
+        details: data,
+      });
+    }
+
+    const userId = data.data.metadata?.userId;
+    const jobId = data.data.metadata?.jobId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing userId in metadata",
+      });
+    }
+
+    // ✅ UPDATE USER
+    await db.collection("users").doc(userId).update({
+      isPro: true,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    res.json({ result: response.choices[0].message.content });
-  } catch {
-    res.status(500).json({ error: "AI failed" });
+    // ✅ UPDATE TRANSACTION
+    await db.collection("transactions").doc(reference).update({
+      status: "success",
+      verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log("✅ PAYMENT VERIFIED:", reference);
+
+    return res.json({
+      success: true,
+      reference,
+      userId,
+      jobId,
+    });
+  } catch (err) {
+    console.error("❌ VERIFY ERROR:", err.message);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
   }
 });
 
 // ============================================
-// 🚀 SERVER
+// 🏁 HEALTH CHECK
 // ============================================
 app.get("/", (req, res) => {
   res.send("🔥 Artisan 3.0 Backend LIVE");
 });
 
+// ============================================
+// 🚀 START SERVER (🔥 PORT SAFE)
+// ============================================
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log("🚀 Server running:", PORT));
+
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+});
+
+// 🔥 HANDLE PORT IN USE (NO CRASH)
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.log("⚠️ Port already in use → Server already running ✅");
+  } else {
+    console.error("💥 SERVER ERROR:", err);
+  }
+});

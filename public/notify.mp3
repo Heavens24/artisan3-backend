@@ -1,0 +1,4 @@
+const playSound = () => {
+  const audio = new Audio("/notify.mp3");
+  audio.play();
+};

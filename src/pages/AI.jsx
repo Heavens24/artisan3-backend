@@ -8,12 +8,7 @@ import {
   collection,
   serverTimestamp,
 } from "firebase/firestore";
-
-import {
-  ref,
-  uploadBytes,
-  getDownloadURL,
-} from "firebase/storage";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export default function AI() {
   const { user } = useAuth();
@@ -23,26 +18,19 @@ export default function AI() {
   const [userData, setUserData] = useState(null);
   const [result, setResult] = useState(null);
 
-  // 🖼️ IMAGE STATES
   const [imageFile, setImageFile] = useState(null);
-  const [imageUrl, setImageUrl] = useState("");
   const [preview, setPreview] = useState("");
 
-  // 🔒 Load user
   useEffect(() => {
     if (!user) return;
 
-    const refDoc = doc(db, "users", user.uid);
-    const unsub = onSnapshot(refDoc, (snap) => {
+    const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
       setUserData(snap.data());
     });
 
     return () => unsub();
   }, [user]);
 
-  if (!user) return <p>Loading...</p>;
-
-  // 📸 HANDLE IMAGE SELECT
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -51,165 +39,88 @@ export default function AI() {
     setPreview(URL.createObjectURL(file));
   };
 
-  // ☁️ UPLOAD IMAGE TO FIREBASE
   const uploadImage = async () => {
     if (!imageFile) return "";
 
-    const storageRef = ref(storage, `maintenance/${Date.now()}_${imageFile.name}`);
+    const storageRef = ref(storage, `ai/${Date.now()}_${imageFile.name}`);
     await uploadBytes(storageRef, imageFile);
-    const url = await getDownloadURL(storageRef);
-
-    setImageUrl(url);
-    return url;
+    return await getDownloadURL(storageRef);
   };
 
-  // 🚀 AI REQUEST
   const askAI = async () => {
-    if (!prompt && !imageFile)
+    if (!prompt && !imageFile) {
       return alert("Add a description or image");
+    }
 
     setLoading(true);
     setResult(null);
 
     try {
-      let uploadedUrl = imageUrl;
-
-      // Upload image if not uploaded yet
-      if (imageFile && !imageUrl) {
-        uploadedUrl = await uploadImage();
-      }
+      const imageUrl = await uploadImage();
 
       const res = await fetch("http://localhost:5000/api/ai", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt,
-          imageUrl: uploadedUrl,
-        }),
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ prompt, imageUrl }),
       });
 
       const data = await res.json();
 
-      if (!res.ok) {
-        alert(data.error || "AI failed");
-        return;
+      if (!res.ok || !data?.data) {
+        throw new Error(data?.error || "AI failed");
       }
 
-      const parsed = data.data;
+      setResult(data.data);
 
-      setResult(parsed);
-
-      // 💾 SAVE
-      await addDoc(collection(db, "maintenance_logs"), {
+      await addDoc(collection(db, "maintenanceLogs"), {
         userId: user.uid,
-        imageUrl: uploadedUrl || "",
-        problem: parsed.problem,
-        solution: parsed.solution,
-        tools: parsed.tools || [],
-        severity: parsed.severity,
-        estimatedCost: parsed.estimatedCost,
-        nextMaintenanceDate: parsed.nextMaintenanceDate,
+        imageUrl,
+        ...data.data,
         createdAt: serverTimestamp(),
       });
 
     } catch (err) {
       console.error(err);
-      alert("Error contacting AI");
+      alert("❌ Error contacting AI server");
     }
 
     setLoading(false);
   };
 
   return (
-    <div style={{ padding: "30px", color: "white" }}>
-      <h2>🔧 AI Repair Assistant</h2>
+    <div className="min-h-screen text-white p-6 max-w-3xl mx-auto">
 
-      {/* 💎 PLAN */}
-      <p>
-        {userData?.isPro
-          ? "💎 Pro — Unlimited"
-          : `Free — ${userData?.usageCount || 0}/3`}
+      <h1 className="text-2xl font-bold mb-4">🤖 AI Repair Assistant</h1>
+
+      <p className="text-gray-400 mb-4">
+        {userData?.isPro ? "💎 Pro Active" : "Free Plan"}
       </p>
 
-      {/* 📸 IMAGE UPLOAD */}
-      <input type="file" accept="image/*" onChange={handleImageChange} />
+      <input type="file" onChange={handleImageChange} className="mb-4" />
 
       {preview && (
-        <div style={{ marginTop: "10px" }}>
-          <img
-            src={preview}
-            alt="preview"
-            style={{
-              width: "200px",
-              borderRadius: "10px",
-              marginTop: "10px",
-            }}
-          />
-        </div>
+        <img src={preview} className="w-48 rounded-xl mb-4" />
       )}
 
-      {/* ✍️ TEXT INPUT */}
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Describe the issue (optional if image provided)..."
-        style={{
-          width: "100%",
-          height: "100px",
-          marginTop: "10px",
-          borderRadius: "8px",
-          padding: "10px",
-        }}
+        className="w-full p-3 rounded-xl bg-white/5 border border-white/10 mb-4"
+        placeholder="Describe the issue..."
       />
 
-      {/* 🚀 BUTTON */}
       <button
         onClick={askAI}
-        style={{
-          marginTop: "10px",
-          padding: "10px 15px",
-          borderRadius: "8px",
-          background: "#00ffcc",
-          border: "none",
-          cursor: "pointer",
-          fontWeight: "bold",
-        }}
+        className="bg-cyan-500 px-6 py-3 rounded-xl font-semibold"
       >
-        {loading ? "Analyzing..." : "Analyze Problem ⚡"}
+        {loading ? "Analyzing..." : "Analyze ⚡"}
       </button>
 
-      {/* 🧠 RESULT */}
       {result && (
-        <div
-          style={{
-            marginTop: "25px",
-            background: "#1e293b",
-            padding: "15px",
-            borderRadius: "10px",
-          }}
-        >
-          <h3>🧠 Diagnosis</h3>
-
-          <p><strong>Problem:</strong> {result.problem}</p>
-          <p><strong>Severity:</strong> {result.severity}</p>
-
-          <p><strong>Solution:</strong></p>
-          <p>{result.solution}</p>
-
-          <p><strong>Tools:</strong></p>
-          <ul>
-            {result.tools?.map((t, i) => (
-              <li key={i}>{t}</li>
-            ))}
-          </ul>
-
-          <p><strong>Estimated Cost:</strong> {result.estimatedCost}</p>
-
-          <p style={{ marginTop: "10px", color: "#94a3b8" }}>
-            ✅ Saved to maintenance history
-          </p>
+        <div className="mt-6 bg-white/5 p-6 rounded-2xl border border-white/10">
+          <h3 className="font-semibold mb-2">Diagnosis</h3>
+          <p><b>Problem:</b> {result.problem}</p>
+          <p><b>Solution:</b> {result.solution}</p>
         </div>
       )}
     </div>

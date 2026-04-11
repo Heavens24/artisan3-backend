@@ -1,132 +1,100 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useState } from "react";
 
 export default function Sidebar() {
   const { user } = useAuth();
   const location = useLocation();
+  const [open, setOpen] = useState(false);
 
   if (!user) return null;
 
   const isActive = (path) => location.pathname.startsWith(path);
 
-  const linkStyle = (path) => ({
-    display: "block",
-    padding: "10px 14px",
-    margin: "6px 0",
-    borderRadius: "10px",
-    textDecoration: "none",
-    fontSize: "14px",
-    fontWeight: "500",
-    color: isActive(path) ? "#000" : "#cbd5f5",
-    background: isActive(path) ? "#00ffcc" : "transparent",
-    boxShadow: isActive(path)
-      ? "0 0 10px rgba(0,255,204,0.4)"
-      : "none",
-    transition: "all 0.2s ease"
-  });
+  const section = (title) => (
+    <p className="text-xs text-gray-400 mt-6 mb-2 uppercase tracking-wider">
+      {title}
+    </p>
+  );
 
-  const sectionTitle = {
-    fontSize: "11px",
-    color: "#64748b",
-    marginTop: "18px",
-    marginBottom: "6px",
-    textTransform: "uppercase",
-    letterSpacing: "1px"
-  };
+  const linkClass = (path) =>
+    `flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition ${
+      isActive(path)
+        ? "bg-teal-400 text-black shadow-lg"
+        : "text-gray-300 hover:bg-white/5"
+    }`;
+
+  const menu = (
+    <>
+      {section("Core")}
+      <Link to="/dashboard" className={linkClass("/dashboard")}>📊 Dashboard</Link>
+      <Link to="/tasks" className={linkClass("/tasks")}>✅ Tasks</Link>
+      <Link to="/tools" className={linkClass("/tools")}>🧰 Tools</Link>
+      <Link to="/logs" className={linkClass("/logs")}>📋 Maintenance Logs</Link>
+
+      {section("Communication")}
+      <Link to="/chat" className={linkClass("/chat")}>💬 Chats</Link>
+
+      {section("Marketplace")}
+      <Link to="/marketplace" className={linkClass("/marketplace")}>🧑‍🔧 Browse Jobs</Link>
+      <Link to="/applications" className={linkClass("/applications")}>📩 Applications</Link>
+      <Link to="/become-artisan" className={linkClass("/become-artisan")}>🛠 Become Artisan</Link>
+
+      {section("Finance")}
+      <Link to="/wallet" className={linkClass("/wallet")}>💰 Wallet</Link>
+
+      {section("AI Tools")}
+      <Link to="/ai" className={linkClass("/ai")}>🤖 Instant Repair Assistant</Link>
+    </>
+  );
 
   return (
-    <div
-      style={{
-        width: "240px",
-        height: "100vh",
-        background: "#0f172a",
-        position: "fixed",
-        top: 0,
-        left: 0,
-        borderRight: "1px solid #1e293b",
-        display: "flex",
-        flexDirection: "column",
-        zIndex: 1000
-      }}
-    >
-      {/* 🔝 HEADER */}
-      <div style={{ padding: "20px", borderBottom: "1px solid #1e293b" }}>
-        <h2 style={{ color: "#00ffcc", marginBottom: "5px" }}>
-          🛠 Artisan3.0
-        </h2>
-
-        <p style={{ color: "#94a3b8", fontSize: "12px" }}>
-          Smart Pocket System
-        </p>
+    <>
+      {/* 📱 MOBILE TOP BAR */}
+      <div className="md:hidden flex justify-between items-center p-4 bg-slate-900 border-b border-white/10">
+        <h1 className="font-semibold text-teal-400">🛠 Artisan3.0</h1>
+        <button onClick={() => setOpen(true)}>☰</button>
       </div>
 
-      {/* 🔽 MENU */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "15px"
-        }}
-      >
-        <nav>
+      {/* 📱 MOBILE SIDEBAR */}
+      {open && (
+        <div className="fixed inset-0 bg-black/50 z-40 md:hidden">
+          <div className="w-64 bg-slate-900 h-full p-5 overflow-y-auto">
+            <button
+              onClick={() => setOpen(false)}
+              className="mb-4 text-right w-full"
+            >
+              ❌
+            </button>
+            {menu}
+          </div>
+        </div>
+      )}
 
-          {/* CORE */}
-          <p style={sectionTitle}>Core</p>
+      {/* 💻 DESKTOP SIDEBAR */}
+      <aside className="hidden md:flex flex-col w-64 h-screen fixed top-0 left-0 bg-slate-900 p-5 border-r border-white/10">
+        {/* Header */}
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-teal-400">
+            🛠 Artisan3.0
+          </h2>
+          <p className="text-xs text-gray-400">
+            Smart Pocket System
+          </p>
+        </div>
 
-          <Link to="/dashboard" style={linkStyle("/dashboard")}>
-            📊 Dashboard
-          </Link>
-
-          <Link to="/tasks" style={linkStyle("/tasks")}>
-            ✅ Tasks
-          </Link>
-
-          <Link to="/tools" style={linkStyle("/tools")}>
-            🧰 Tools
-          </Link>
-
-          <Link to="/logs" style={linkStyle("/logs")}>
-            📋 Maintenance Logs
-          </Link>
-
-          {/* COMMUNICATION */}
-          <p style={sectionTitle}>Communication</p>
-
-          <Link to="/chat" style={linkStyle("/chat")}>
-            💬 Chats
-          </Link>
-
-          {/* MARKETPLACE */}
-          <p style={sectionTitle}>Marketplace</p>
-
-          <Link to="/marketplace" style={linkStyle("/marketplace")}>
-            🧑‍🔧 Browse Jobs
-          </Link>
-
-          <Link to="/applications" style={linkStyle("/applications")}>
-            📩 Applications
-          </Link>
-
-          <Link to="/become-artisan" style={linkStyle("/become-artisan")}>
-            🛠 Become Artisan
-          </Link>
-
-          {/* 💰 WALLET */}
-          <p style={sectionTitle}>Finance</p>
-
-          <Link to="/wallet" style={linkStyle("/wallet")}>
-            💰 Wallet
-          </Link>
-
-          {/* AI */}
-          <p style={sectionTitle}>AI Tools</p>
-
-          <Link to="/ai" style={linkStyle("/ai")}>
-            🤖 Instant Repair Assistant
-          </Link>
-
+        {/* Menu */}
+        <nav className="flex-1 overflow-y-auto pr-1">
+          {menu}
         </nav>
-      </div>
-    </div>
+
+        {/* User */}
+        <div className="mt-4 pt-4 border-t border-white/10">
+          <p className="text-xs text-gray-400 truncate">
+            {user.email}
+          </p>
+        </div>
+      </aside>
+    </>
   );
 }
