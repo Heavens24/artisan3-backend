@@ -1,237 +1,170 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect, useRef } from "react";
-
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"; // <-- FIXED: removed Suspense, lazy
+import { useEffect, useState, Suspense, lazy } from "react"; // <-- ADDED Suspense, lazy HERE
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import Layout from "./components/Layout";
-import NotificationProvider, {
-  notifyInfo,
-} from "./components/NotificationProvider";
+import NotificationProvider from "./components/NotificationProvider";
+import { HelmetProvider } from "react-helmet-async";
 
 import {
-  requestPermission,
-  listenNotifications,
-} from "./firebase-messaging";
-
-import {
-  doc,
-  updateDoc,
-  serverTimestamp,
   collection,
   onSnapshot,
+  query,
+  where,
+  doc
 } from "firebase/firestore";
 
 import { db } from "./firebase";
 
-// Pages
-import Dashboard from "./pages/Dashboard";
-import Tasks from "./pages/Tasks";
-import Tools from "./pages/Tools";
-import MaintenanceLogs from "./pages/MaintenanceLogs";
-import Knowledge from "./pages/Knowledge";
-import AI from "./pages/AI";
-import ChatList from "./pages/ChatList";
-import PrivateChat from "./pages/PrivateChat";
-import BecomeArtisan from "./pages/BecomeArtisan";
-import Marketplace from "./pages/Marketplace";
-import Applications from "./pages/Applications";
-import PaymentSuccess from "./pages/PaymentSuccess";
-import Wallet from "./pages/Wallet";
-import Admin from "./pages/Admin"; // 🧑‍💼 NEW
+// LAZY PAGES - #9 Code Split: only load when visited
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Tasks = lazy(() => import("./pages/Tasks"));
+const Tools = lazy(() => import("./pages/Tools"));
+const MaintenanceLogs = lazy(() => import("./pages/MaintenanceLogs"));
+const AI = lazy(() => import("./pages/AI"));
+const Notifications = lazy(() => import("./pages/Notifications"));
+const Verification = lazy(() => import("./pages/Verification"));
+const PublicJobs = lazy(() => import("./pages/PublicJobs"));
+const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
+const Settings = lazy(() => import("./pages/Settings"));
+const ChatList = lazy(() => import("./pages/ChatList"));
+const PrivateChat = lazy(() => import("./pages/PrivateChat"));
+const MyJobs = lazy(() => import("./pages/MyJobs"));
+const Applications = lazy(() => import("./pages/Applications"));
+const Marketplace = lazy(() => import("./pages/Marketplace"));
 
+// Keep Login/Register eager - needed immediately for auth
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 
-// 🔊 SOUND
-const playSound = () => {
-  const audio = new Audio("/notify.mp3");
-  audio.play().catch(() => {});
-};
-
-// 🔐 NORMAL PROTECTED
 function Protected({ children }) {
   const { user } = useAuth();
-
-  if (user === undefined) {
-    return <p className="p-6 text-white">Loading...</p>;
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
+  if (!user) return <Navigate to="/login" />;
   return children;
 }
 
-// 🧑‍💼 ADMIN PROTECTED (NEW 🔥)
-function AdminProtected({ children }) {
+function ProProtected({ children }) {
   const { user } = useAuth();
+  const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  if (user === undefined) {
-    return <p className="p-6 text-white">Loading...</p>;
-  }
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
+      setUserData(snap.data() || {});
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [user?.uid]);
 
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  // ⚠️ Safe fallback
-  if (!user.role || user.role !== "admin") {
-    return <Navigate to="/dashboard" replace />;
-  }
-
+  if (loading) return <div className="p-6 text-white">Loading...</div>;
+  if (!user) return <Navigate to="/login" />;
+  if (!userData?.isPro) return <Navigate to="/dashboard" />;
   return children;
 }
 
-// 🚀 ROUTES
+// Loading fallback for lazy routes
+const PageLoader = () => (
+  <div className="flex items-center justify-center h-64">
+    <div className="text-gray-400">Loading...</div>
+  </div>
+);
+
 function AppRoutes() {
   const { user } = useAuth();
-  const triggeredReminders = useRef(new Set());
 
-  // 🔔 PUSH NOTIFICATIONS
+  // 🔔 GLOBAL CHAT SOUND
   useEffect(() => {
-    let isMounted = true;
+    if (!user?.uid) return;
 
-    const init = async () => {
-      try {
-        if (!user) return;
+    const q = query(
+      collection(db, "chats"),
+      where("participants", "array-contains", user.uid)
+    );
 
-        await requestPermission();
-
-        if (isMounted) listenNotifications();
-      } catch (err) {
-        console.log("Notification error:", err);
-      }
-    };
-
-    init();
-    return () => (isMounted = false);
-  }, [user]);
-
-  // 🟢 ONLINE PRESENCE
-  useEffect(() => {
-    if (!user) return;
-
-    const userRef = doc(db, "users", user.uid);
-
-    const goOnline = () =>
-      updateDoc(userRef, {
-        online: true,
-        lastSeen: serverTimestamp(),
-      }).catch(() => {});
-
-    const goOffline = () =>
-      updateDoc(userRef, {
-        online: false,
-        lastSeen: serverTimestamp(),
-      }).catch(() => {});
-
-    goOnline();
-    window.addEventListener("beforeunload", goOffline);
-
-    return () => {
-      goOffline();
-      window.removeEventListener("beforeunload", goOffline);
-    };
-  }, [user]);
-
-  // 🔥 SMART REMINDERS
-  useEffect(() => {
-    if (!user) return;
-
-    const q = collection(db, "maintenance_logs");
-
-    const unsub = onSnapshot(q, (snapshot) => {
-      snapshot.docs.forEach((docItem) => {
-        const log = docItem.data();
-
-        if (!log.nextMaintenance) return;
-
-        const id = docItem.id;
-
-        const next = new Date(
-          log.nextMaintenance.seconds * 1000
-        );
-
-        const diff =
-          (next - new Date()) / (1000 * 60 * 60 * 24);
-
-        if (diff <= 1 && diff > 0 && !triggeredReminders.current.has(id)) {
-          triggeredReminders.current.add(id);
-
-          notifyInfo(`🔧 Maintenance due: ${log.title}`);
-          playSound();
+    const unsub = onSnapshot(q, (snap) => {
+      snap.docs.forEach((docSnap) => {
+        const chat = docSnap.data();
+        if (chat.lastMessage && chat.seen?.[user.uid] === false) {
+          const audio = new Audio("/message.mp3");
+          audio.volume = 0.5;
+          audio.play().catch(() => {});
         }
       });
     });
 
     return () => unsub();
-  }, [user]);
-
-  if (user === undefined) {
-    return <p className="p-6 text-white">Loading app...</p>;
-  }
+  }, );
 
   return (
-    <Routes>
-      {/* DEFAULT */}
-      <Route path="/" element={<Navigate to="/dashboard" />} />
+    <Suspense fallback={<PageLoader />}> {/* <-- WRAP ALL ROUTES #9 */}
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
 
-      {/* AUTH */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+        {/* PAYMENT CALLBACK - No auth needed, Paystack redirects here */}
+        <Route path="/payment-success" element={<PaymentSuccess />} />
 
-      {/* PROTECTED ROUTES */}
-      {[
-        ["/dashboard", <Dashboard />],
-        ["/tasks", <Tasks />],
-        ["/tools", <Tools />],
-        ["/logs", <MaintenanceLogs />],
-        ["/knowledge", <Knowledge />],
-        ["/ai", <AI />],
-        ["/chat", <ChatList />],
-        ["/chat/:chatId", <PrivateChat />],
-        ["/marketplace", <Marketplace />],
-        ["/applications", <Applications />],
-        ["/wallet", <Wallet />],
-        ["/become-artisan", <BecomeArtisan />],
-      ].map(([path, component]) => (
-        <Route
-          key={path}
-          path={path}
-          element={
-            <Protected>
-              <Layout>{component}</Layout>
-            </Protected>
-          }
-        />
-      ))}
+        {/* PUBLIC JOB BOARD - SEO + No Auth */}
+        <Route path="/jobs" element={<PublicJobs />} />
+        <Route path="/jobs/:jobId" element={<PublicJobs />} />
 
-      {/* 🧑‍💼 ADMIN ROUTE (NEW 🔥) */}
-      <Route
-        path="/admin"
-        element={
-          <AdminProtected>
-            <Layout>
-              <Admin />
-            </Layout>
-          </AdminProtected>
-        }
-      />
+        {/* FREE ROUTES */}
+        {[
+          ["/dashboard", <Dashboard />],
+          ["/tasks", <Tasks />],
+          ["/tools", <Tools />],
+          ["/logs", <MaintenanceLogs />],
+          ["/ai", <AI />],
+          ["/notifications", <Notifications />],
+          ["/verification", <Verification />],
+          ["/settings", <Settings />],
+        ].map(([path, component]) => (
+          <Route
+            key={path}
+            path={path}
+            element={
+              <Protected>
+                <Layout>{component}</Layout>
+              </Protected>
+            }
+          />
+        ))}
 
-      {/* 💳 PAYMENT */}
-      <Route path="/payment-success" element={<PaymentSuccess />} />
-    </Routes>
+        {/* PRO ROUTES - R10/month required */}
+        {[
+          ["/marketplace", <Marketplace />],
+          ["/my-jobs", <MyJobs />],
+          ["/applications", <Applications />],
+          ["/chat", <ChatList />],
+          ["/chat/:chatId", <PrivateChat />],
+        ].map(([path, component]) => (
+          <Route
+            key={path}
+            path={path}
+            element={
+              <Protected>
+                <ProProtected>
+                  <Layout>{component}</Layout>
+                </ProProtected>
+              </Protected>
+            }
+          />
+        ))}
+      </Routes>
+    </Suspense>
   );
 }
 
-// 🌍 ROOT
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <NotificationProvider />
-        <AppRoutes />
-      </BrowserRouter>
-    </AuthProvider>
+    <HelmetProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <NotificationProvider />
+          <AppRoutes />
+        </BrowserRouter>
+      </AuthProvider>
+    </HelmetProvider>
   );
 }

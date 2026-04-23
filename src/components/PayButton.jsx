@@ -1,44 +1,39 @@
 import { useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { notifyError } from "../components/NotificationProvider";
 
-const API_URL = "http://localhost:5000";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-const PayButton = ({ job, user }) => {
+export default function PayButton() {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
 
   const payNow = async () => {
     try {
-      if (!user?.email || !user?.uid) {
-        alert("User not authenticated");
-        return;
-      }
+      if (!user?.email) return notifyError("Not authenticated");
 
       setLoading(true);
 
       const res = await fetch(`${API_URL}/pay`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: user.email,
-          amount: job?.budget || 100,
-          userId: user.uid
-        })
+          amount: 10,
+          userId: user.uid,
+          jobId: "subscription"
+        }),
       });
 
       const data = await res.json();
+      if (!res.ok ||!data?.authorization_url) {
+        throw new Error(data.error || "Payment failed");
+      }
 
-      const paymentUrl = data?.authorization_url;
-
-      if (!paymentUrl) throw new Error("Payment init failed");
-
-      localStorage.setItem("paymentJobId", job?.id || "unknown");
-
-      window.location.href = paymentUrl;
-
+      window.location.href = data.authorization_url;
     } catch (err) {
       console.error(err);
-      alert("Payment error ❌");
+      notifyError("Payment failed");
     } finally {
       setLoading(false);
     }
@@ -47,12 +42,10 @@ const PayButton = ({ job, user }) => {
   return (
     <button
       onClick={payNow}
+      className="bg-cyan-500 px-6 py-3 rounded-xl hover:bg-cyan-600 transition disabled:opacity-50"
       disabled={loading}
-      className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg transition"
     >
-      {loading ? "Processing..." : "💰 Pay & Start Job"}
+      {loading? "Processing..." : "Upgrade to Pro (R10/month)"}
     </button>
   );
-};
-
-export default PayButton;
+}

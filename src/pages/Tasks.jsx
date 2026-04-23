@@ -14,6 +14,7 @@ import {
 
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
+import { notifySuccess, notifyError } from "../components/NotificationProvider";
 
 export default function Tasks() {
   const { user } = useAuth();
@@ -22,12 +23,15 @@ export default function Tasks() {
   const [date, setDate] = useState("");
   const [priority, setPriority] = useState("medium");
   const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  // LOAD TASKS
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!user?.uid) {
+      setLoading(false);
+      return;
+    }
 
     const q = query(
       collection(db, "tasks"),
@@ -35,258 +39,201 @@ export default function Tasks() {
       orderBy("createdAt", "desc")
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const list = snapshot.docs.map((doc) => ({
+          id: doc.id,
+         ...doc.data()
+        }));
+        setTasks(list);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Tasks listener error:", err);
+        notifyError("Could not load tasks");
+        setLoading(false);
+      }
+    );
 
-      setTasks(list);
-      setLoading(false);
-    });
+    return () => unsub();
+  }, [user?.uid]);
 
-    return () => unsubscribe();
-  }, [user]);
-
-  // ADD / UPDATE
   const handleSaveTask = async () => {
-    if (!user?.uid) return alert("User not ready");
-    if (!title.trim()) return alert("Enter task title");
-    if (!date) return alert("Select date");
-
-    const parsedDate = new Date(date);
-    if (isNaN(parsedDate.getTime())) return alert("Invalid date");
+    if (!title.trim() ||!date) return notifyError("Fill all fields");
+    if (!user?.uid) return notifyError("Not logged in");
 
     try {
+      setSaving(true);
+      const reminder = new Date(date);
+
       if (editingId) {
         await updateDoc(doc(db, "tasks", editingId), {
           title: title.trim(),
           priority,
-          reminderTime: parsedDate.toISOString()
+          reminderTime: reminder,
+          updatedAt: serverTimestamp()
         });
+        notifySuccess("Task updated");
       } else {
         await addDoc(collection(db, "tasks"), {
           userId: user.uid,
           title: title.trim(),
           priority,
-          reminderTime: parsedDate.toISOString(),
+          reminderTime: reminder,
           status: "pending",
           notified: false,
           createdAt: serverTimestamp()
         });
+        notifySuccess("Task added");
       }
 
       setTitle("");
       setDate("");
       setPriority("medium");
       setEditingId(null);
-
     } catch (err) {
       console.error(err);
+      notifyError(err.code === 'permission-denied'
+       ? "No permission to save task"
+        : "Failed to save task");
+    } finally {
+      setSaving(false);
     }
   };
 
-  // DELETE
-  const handleDelete = async (id) => {
-    await deleteDoc(doc(db, "tasks", id));
-  };
-
-  // TOGGLE COMPLETE
   const toggleComplete = async (task) => {
-    await updateDoc(doc(db, "tasks", task.id), {
-      status: task.status === "completed" ? "pending" : "completed"
-    });
+    try {
+      await updateDoc(doc(db, "tasks", task.id), {
+        status: task.status === "completed"? "pending" : "completed"
+      });
+    } catch (err) {
+      console.error(err);
+      notifyError("Could not update task");
+    }
   };
 
-  // EDIT
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this task?")) return;
+    try {
+      await deleteDoc(doc(db, "tasks", id));
+      notifySuccess("Task deleted");
+    } catch (err) {
+      console.error(err);
+      notifyError("Could not delete task");
+    }
+  };
+
+  const toLocalDateTimeString = (t) => {
+    if (!t) return "";
+    const d = new Date(t.seconds? t.seconds * 1000 : t);
+    if (isNaN(d)) return "";
+    const offset = d.getTimezoneOffset();
+    const local = new Date(d.getTime() - offset * 60 * 1000);
+    return local.toISOString().slice(0, 16);
+  };
+
   const handleEdit = (task) => {
     setTitle(task.title);
     setPriority(task.priority);
-
-    if (task.reminderTime) {
-      const d = new Date(task.reminderTime);
-      setDate(d.toISOString().slice(0, 16));
-    }
-
+    setDate(toLocalDateTimeString(task.reminderTime));
     setEditingId(task.id);
   };
 
-  // FORMAT DATE
-  const formatDate = (time) => {
-    const d = new Date(time);
-    if (isNaN(d.getTime())) return "No valid date";
-    return d.toLocaleString();
+  const formatDate = (t) => {
+    if (!t) return "-";
+    const d = new Date(t.seconds? t.seconds * 1000 : t);
+    return isNaN(d)? "-" : d.toLocaleString();
   };
 
   return (
-    <div style={styles.container}>
-      <h2 style={styles.title}>📋 Task Manager</h2>
+    <div className="p-2 md:p-6 text-white">
+      <h2 className="text-2xl mb-4">📋 Tasks</h2>
 
-      {/* FORM */}
-      <div style={styles.form}>
+      <div className="flex gap-2 flex-wrap mb-4">
         <input
-          style={styles.input}
-          type="text"
-          placeholder="Task title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          placeholder="Task"
+          className="p-2 bg-slate-800 rounded outline-none focus:ring-2 focus:ring-blue-500 flex-1 min-w-[150px]"
         />
 
         <input
-          style={styles.input}
           type="datetime-local"
           value={date}
           onChange={(e) => setDate(e.target.value)}
+          className="p-2 bg-slate-800 rounded outline-none focus:ring-2 focus:ring-blue-500"
         />
 
         <select
-          style={styles.input}
           value={priority}
           onChange={(e) => setPriority(e.target.value)}
+          className="p-2 bg-slate-800 rounded outline-none focus:ring-2 focus:ring-blue-500"
         >
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
         </select>
 
-        <button style={styles.addBtn} onClick={handleSaveTask}>
-          {editingId ? "💾 Update Task" : "➕ Add Task"}
+        <button
+          onClick={handleSaveTask}
+          disabled={saving}
+          className="bg-blue-600 px-4 rounded hover:bg-blue-700 transition disabled:opacity-50"
+        >
+          {saving? "Saving..." : editingId? "Update" : "Add"}
         </button>
+
+        {editingId && (
+          <button
+            onClick={() => {
+              setEditingId(null);
+              setTitle("");
+              setDate("");
+              setPriority("medium");
+            }}
+            className="bg-gray-600 px-4 rounded hover:bg-gray-700 transition"
+          >
+            Cancel
+          </button>
+        )}
       </div>
 
-      {/* LIST */}
-      {loading ? (
-        <p style={styles.text}>Loading...</p>
-      ) : tasks.length === 0 ? (
-        <p style={styles.text}>No tasks yet</p>
+      {loading? (
+        <p>Loading...</p>
+      ) : tasks.length === 0? (
+        <div className="text-center py-16 bg-slate-800/50 rounded-2xl">
+          <div className="text-6xl mb-4">✅</div>
+          <h3 className="text-xl font-bold mb-2">No tasks yet</h3>
+          <p className="text-gray-400 mb-6 max-w-sm mx-auto">Track what Transnet wants done + your weekend side jobs in one place. Never forget a deadline.</p>
+          <button
+            onClick={() => document.querySelector('input[placeholder="Task"]').focus()}
+            className="bg-teal-500 text-black px-6 py-2 rounded-lg font-semibold hover:bg-teal-400 transition"
+          >
+            Add First Task
+          </button>
+        </div>
       ) : (
-        <ul style={styles.list}>
-          {tasks.map((task) => (
-            <li
-              key={task.id}
-              style={{
-                ...styles.card,
-                background:
-                  task.status === "completed" ? "#1e4620" : "#1a1a1a"
-              }}
-            >
-              <strong
-                style={{
-                  ...styles.taskTitle,
-                  textDecoration:
-                    task.status === "completed" ? "line-through" : "none"
-                }}
-              >
-                {task.title}
-              </strong>
+        tasks.map((t) => (
+          <div key={t.id} className="bg-slate-800 p-3 mb-2 rounded flex justify-between items-start">
+            <div>
+              <p className={`font-semibold ${t.status === "completed"? "line-through text-gray-400" : ""}`}>
+                {t.title}
+              </p>
+              <p className="text-sm text-gray-400">
+                {t.priority} • {formatDate(t.reminderTime)}
+              </p>
+            </div>
 
-              <p style={styles.text}>Priority: {task.priority}</p>
-              <p style={styles.text}>Time: {formatDate(task.reminderTime)}</p>
-              <p style={styles.text}>Status: {task.status}</p>
-
-              <div style={styles.actions}>
-                <button
-                  style={styles.completeBtn}
-                  onClick={() => toggleComplete(task)}
-                >
-                  ✅
-                </button>
-
-                <button
-                  style={styles.editBtn}
-                  onClick={() => handleEdit(task)}
-                >
-                  ✏️
-                </button>
-
-                <button
-                  style={styles.deleteBtn}
-                  onClick={() => handleDelete(task.id)}
-                >
-                  🗑
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+            <div className="flex gap-2">
+              <button onClick={() => toggleComplete(t)} className="hover:scale-110 transition">
+                {t.status === "completed"? "↩️" : "✅"}
+              </button>
+              <button onClick={() => handleEdit(t)} className="hover:scale-110 transition">✏️</button>
+              <button onClick={() => handleDelete(t.id)} className="hover:scale-110 transition">🗑</button>
+            </div>
+          </div>
+        ))
       )}
     </div>
   );
 }
-
-// 🎨 DARK UI STYLES
-const styles = {
-  container: {
-    padding: "20px",
-    background: "#0f1115",
-    minHeight: "100vh",
-    color: "#fff"
-  },
-  title: {
-    marginBottom: "20px"
-  },
-  form: {
-    display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
-    marginBottom: "20px"
-  },
-  input: {
-    padding: "10px",
-    background: "#1f2229",
-    border: "1px solid #333",
-    color: "#fff",
-    borderRadius: "6px"
-  },
-  addBtn: {
-    padding: "10px 15px",
-    background: "#4f46e5",
-    color: "#fff",
-    border: "none",
-    borderRadius: "6px",
-    cursor: "pointer"
-  },
-  list: {
-    listStyle: "none",
-    padding: 0
-  },
-  card: {
-    padding: "15px",
-    borderRadius: "10px",
-    marginBottom: "15px",
-    border: "1px solid #333"
-  },
-  taskTitle: {
-    fontSize: "16px"
-  },
-  text: {
-    margin: "5px 0",
-    color: "#ccc"
-  },
-  actions: {
-    marginTop: "10px",
-    display: "flex",
-    gap: "10px"
-  },
-  completeBtn: {
-    background: "#22c55e",
-    border: "none",
-    padding: "8px",
-    borderRadius: "6px",
-    cursor: "pointer"
-  },
-  editBtn: {
-    background: "#facc15",
-    border: "none",
-    padding: "8px",
-    borderRadius: "6px",
-    cursor: "pointer"
-  },
-  deleteBtn: {
-    background: "#ef4444",
-    border: "none",
-    padding: "8px",
-    borderRadius: "6px",
-    cursor: "pointer"
-  }
-};

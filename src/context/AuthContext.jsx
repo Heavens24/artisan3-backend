@@ -5,67 +5,48 @@ import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 const AuthContext = createContext();
 
+export function useAuth() {
+  return useContext(AuthContext);
+}
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(undefined); // 👈 loading state
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      try {
-        // ❌ Not logged in
-        if (!firebaseUser) {
-          setUser(null);
-          return;
-        }
-
-        // 🔍 Fetch user from Firestore
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Ensure user doc exists to prevent rule errors
         const userRef = doc(db, "users", firebaseUser.uid);
         const userSnap = await getDoc(userRef);
-
-        // 🆕 If user does NOT exist → create them
+        
         if (!userSnap.exists()) {
-          const newUser = {
-            uid: firebaseUser.uid,
+          await setDoc(userRef, {
             email: firebaseUser.email,
-            role: "user", // 👈 default role
-            createdAt: serverTimestamp(),
-            online: true,
-          };
-
-          await setDoc(userRef, newUser);
-
-          setUser(newUser);
-        } else {
-          // ✅ Existing user → merge Auth + Firestore
-          const dbData = userSnap.data();
-
-          setUser({
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            role: dbData.role || "user", // 🔥 ADMIN READY
-            online: dbData.online || false,
-            ...dbData,
+            role: "client",
+            isPro: false,
+            verified: false,
+            createdAt: serverTimestamp()
           });
         }
-      } catch (error) {
-        console.error("Auth error:", error);
+        setUser(firebaseUser);
+      } else {
         setUser(null);
       }
+      setLoading(false);
     });
 
-    return () => unsub();
+    return unsubscribe;
   }, []);
 
-  // 🚫 BLOCK APP UNTIL AUTH READY
-  if (user === undefined) {
-    return <p className="p-6 text-white">Loading authentication...</p>;
-  }
+  const value = {
+    user,
+    loading
+  };
 
   return (
-    <AuthContext.Provider value={{ user }}>
-      {children}
+    <AuthContext.Provider value={value}>
+      {!loading && children}
     </AuthContext.Provider>
   );
 }
-
-// 🔥 HOOK
-export const useAuth = () => useContext(AuthContext);

@@ -5,7 +5,8 @@ import {
   where,
   onSnapshot,
   doc,
-  updateDoc
+  updateDoc,
+  getDocs
 } from "firebase/firestore";
 
 import { db } from "../firebase";
@@ -33,10 +34,28 @@ export default function MyJobs() {
     return () => unsub();
   }, [user]);
 
+  // 🔥 FIXED ACCEPT FLOW
   const acceptArtisan = async (jobId, artisanId) => {
+    // update job
     await updateDoc(doc(db, "jobs", jobId), {
       acceptedArtisanId: artisanId,
       status: "in_progress"
+    });
+
+    // update applications
+    const q = query(
+      collection(db, "applications"),
+      where("jobId", "==", jobId)
+    );
+
+    const snap = await getDocs(q);
+
+    snap.forEach(async (docSnap) => {
+      const app = docSnap.data();
+
+      await updateDoc(doc(db, "applications", docSnap.id), {
+        status: app.artisanId === artisanId ? "accepted" : "rejected"
+      });
     });
   };
 
@@ -46,10 +65,17 @@ export default function MyJobs() {
 
       {jobs.map(job => (
         <div key={job.id} className="bg-slate-800 p-4 rounded mb-4">
+
           <h3 className="font-semibold">{job.title}</h3>
+
           <p>Status: {job.status}</p>
 
+          {job.status === "in_progress" && (
+            <p className="text-green-400">✅ Artisan Assigned</p>
+          )}
+
           <ApplicationsList job={job} onAccept={acceptArtisan} />
+
         </div>
       ))}
     </div>
@@ -81,9 +107,11 @@ function ApplicationsList({ job, onAccept }) {
 
       {apps.map(app => (
         <div key={app.id} className="bg-slate-700 p-3 rounded mb-2">
-          <p>{app.artisanEmail}</p>
 
-          {job.status === "open" && (
+          <p>{app.artisanEmail}</p>
+          <p className="text-sm">Status: {app.status}</p>
+
+          {job.status === "searching" && (
             <button
               onClick={() => onAccept(job.id, app.artisanId)}
               className="bg-green-500 px-3 py-1 mt-2 rounded"
@@ -91,6 +119,7 @@ function ApplicationsList({ job, onAccept }) {
               Accept
             </button>
           )}
+
         </div>
       ))}
     </div>
