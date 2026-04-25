@@ -10,7 +10,7 @@ createRoot(document.getElementById('root')).render(
   </StrictMode>
 )
 
-// ✅ Register Service Worker (REQUIRED FOR INSTALL)
+// ✅ Register Service Worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
@@ -24,14 +24,15 @@ if ('serviceWorker' in navigator) {
   })
 }
 
-// ✅ Optional: Capture install prompt (for custom install button later)
-let deferredPrompt
+// ✅ Capture install prompt globally
+let deferredPrompt = null
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault()
   deferredPrompt = e
-  console.log('💡 App is installable')
 
-  // You can trigger this later from a button:
-  // deferredPrompt.prompt()
+  // 👇 make it accessible anywhere in your app
+  window.deferredPrompt = e
+
+  console.log('💡 App is installable')
 })

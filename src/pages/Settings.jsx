@@ -16,8 +16,11 @@ export default function Settings() {
     isPro: false,
   });
 
+  const [installAvailable, setInstallAvailable] = useState(false);
+
   useEffect(() => {
     if (!user?.uid) return;
+
     const fetchUser = async () => {
       const snap = await getDoc(doc(db, "users", user.uid));
       if (snap.exists()) {
@@ -26,20 +29,55 @@ export default function Settings() {
           displayName: data.displayName || user.displayName || "",
           email: data.email || user.email || "",
           darkMode: data.darkMode || false,
-          pushNotifications: data.pushNotifications?? true,
+          pushNotifications: data.pushNotifications ?? true,
           isPro: data.isPro || false,
         });
       }
       setLoading(false);
     };
+
     fetchUser();
   }, [user]);
 
+  // ✅ Detect install availability
+  useEffect(() => {
+    if (window.deferredPrompt) {
+      setInstallAvailable(true);
+    }
+
+    const handler = () => {
+      if (window.deferredPrompt) {
+        setInstallAvailable(true);
+      }
+    };
+
+    window.addEventListener("beforeinstallprompt", handler);
+
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!window.deferredPrompt) {
+      toast("Install not available yet. Try refreshing.");
+      return;
+    }
+
+    window.deferredPrompt.prompt();
+    const choice = await window.deferredPrompt.userChoice;
+
+    if (choice.outcome === "accepted") {
+      toast.success("App installed 🎉");
+      setInstallAvailable(false);
+    }
+
+    window.deferredPrompt = null;
+  };
+
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setForm(prev => ({
-     ...prev,
-      [name]: type === "checkbox"? checked : value
+    setForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
     }));
   };
 
@@ -70,6 +108,7 @@ export default function Settings() {
       {/* Account */}
       <section className="mb-8 bg-gray-800 rounded-lg p-4">
         <h2 className="text-lg font-semibold mb-4">Account</h2>
+
         <label className="block mb-4">
           <span className="text-sm text-gray-300">Display Name</span>
           <input
@@ -79,6 +118,7 @@ export default function Settings() {
             onChange={handleChange}
           />
         </label>
+
         <label className="block mb-4">
           <span className="text-sm text-gray-300">Email</span>
           <input
@@ -87,9 +127,11 @@ export default function Settings() {
             value={form.email}
           />
         </label>
+
         <div className="text-sm">
-          Plan: <span className={form.isPro? "text-green-400" : "text-yellow-400"}>
-            {form.isPro? "Pro – R10/month" : "Free"}
+          Plan:{" "}
+          <span className={form.isPro ? "text-green-400" : "text-yellow-400"}>
+            {form.isPro ? "Pro – R10/month" : "Free"}
           </span>
         </div>
       </section>
@@ -97,6 +139,7 @@ export default function Settings() {
       {/* Preferences */}
       <section className="mb-8 bg-gray-800 rounded-lg p-4">
         <h2 className="text-lg font-semibold mb-4">Preferences</h2>
+
         <label className="flex items-center justify-between mb-4">
           <span>Dark Mode</span>
           <input
@@ -107,6 +150,7 @@ export default function Settings() {
             className="w-5 h-5"
           />
         </label>
+
         <label className="flex items-center justify-between">
           <span>Push Notifications</span>
           <input
@@ -119,9 +163,33 @@ export default function Settings() {
         </label>
       </section>
 
+      {/* 🔥 App Install Section */}
+      <section className="mb-8 bg-gray-800 rounded-lg p-4">
+        <h2 className="text-lg font-semibold mb-4">App</h2>
+
+        <button
+          onClick={handleInstall}
+          disabled={!installAvailable}
+          className={`px-4 py-2 rounded text-white ${
+            installAvailable
+              ? "bg-teal-600 hover:bg-teal-700"
+              : "bg-gray-600 cursor-not-allowed"
+          }`}
+        >
+          {installAvailable ? "Install App" : "Install not available"}
+        </button>
+
+        <p className="text-xs text-gray-400 mt-2">
+          Install Shimlah for a faster, app-like experience.
+        </p>
+      </section>
+
       {/* Danger Zone */}
       <section className="mb-8 bg-gray-800 rounded-lg p-4">
-        <h2 className="text-lg font-semibold mb-4 text-red-400">Danger Zone</h2>
+        <h2 className="text-lg font-semibold mb-4 text-red-400">
+          Danger Zone
+        </h2>
+
         <button
           onClick={logout}
           className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded"
@@ -135,7 +203,7 @@ export default function Settings() {
         disabled={saving}
         className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-6 py-2 rounded"
       >
-        {saving? "Saving..." : "Save Changes"}
+        {saving ? "Saving..." : "Save Changes"}
       </button>
     </div>
   );

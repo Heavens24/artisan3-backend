@@ -1,5 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"; // <-- FIXED: removed Suspense, lazy
-import { useEffect, useState, Suspense, lazy } from "react"; // <-- ADDED Suspense, lazy HERE
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect, useState, Suspense, lazy } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import Layout from "./components/Layout";
 import NotificationProvider from "./components/NotificationProvider";
@@ -15,7 +15,7 @@ import {
 
 import { db } from "./firebase";
 
-// LAZY PAGES - #9 Code Split: only load when visited
+// LAZY PAGES
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Tasks = lazy(() => import("./pages/Tasks"));
 const Tools = lazy(() => import("./pages/Tools"));
@@ -32,9 +32,52 @@ const MyJobs = lazy(() => import("./pages/MyJobs"));
 const Applications = lazy(() => import("./pages/Applications"));
 const Marketplace = lazy(() => import("./pages/Marketplace"));
 
-// Keep Login/Register eager - needed immediately for auth
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+
+// 🔥 INSTALL BUTTON COMPONENT
+function InstallButton() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (window.deferredPrompt) {
+      setVisible(true);
+    }
+
+    const handler = () => {
+      if (window.deferredPrompt) setVisible(true);
+    };
+
+    window.addEventListener("beforeinstallprompt", handler);
+
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!window.deferredPrompt) return;
+
+    window.deferredPrompt.prompt();
+    const choice = await window.deferredPrompt.userChoice;
+
+    if (choice.outcome === "accepted") {
+      console.log("✅ App installed");
+      setVisible(false);
+    }
+
+    window.deferredPrompt = null;
+  };
+
+  if (!visible) return null;
+
+  return (
+    <button
+      onClick={handleInstall}
+      className="fixed bottom-20 right-4 bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-lg shadow-lg z-50"
+    >
+      Install App
+    </button>
+  );
+}
 
 function Protected({ children }) {
   const { user } = useAuth();
@@ -62,7 +105,6 @@ function ProProtected({ children }) {
   return children;
 }
 
-// Loading fallback for lazy routes
 const PageLoader = () => (
   <div className="flex items-center justify-center h-64">
     <div className="text-gray-400">Loading...</div>
@@ -72,7 +114,6 @@ const PageLoader = () => (
 function AppRoutes() {
   const { user } = useAuth();
 
-  // 🔔 GLOBAL CHAT SOUND
   useEffect(() => {
     if (!user?.uid) return;
 
@@ -93,23 +134,18 @@ function AppRoutes() {
     });
 
     return () => unsub();
-  }, );
+  }, [user?.uid]);
 
   return (
-    <Suspense fallback={<PageLoader />}> {/* <-- WRAP ALL ROUTES #9 */}
+    <Suspense fallback={<PageLoader />}>
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-
-        {/* PAYMENT CALLBACK - No auth needed, Paystack redirects here */}
         <Route path="/payment-success" element={<PaymentSuccess />} />
-
-        {/* PUBLIC JOB BOARD - SEO + No Auth */}
         <Route path="/jobs" element={<PublicJobs />} />
         <Route path="/jobs/:jobId" element={<PublicJobs />} />
 
-        {/* FREE ROUTES */}
         {[
           ["/dashboard", <Dashboard />],
           ["/tasks", <Tasks />],
@@ -131,7 +167,6 @@ function AppRoutes() {
           />
         ))}
 
-        {/* PRO ROUTES - R10/month required */}
         {[
           ["/marketplace", <Marketplace />],
           ["/my-jobs", <MyJobs />],
@@ -152,6 +187,9 @@ function AppRoutes() {
           />
         ))}
       </Routes>
+
+      {/* 🔥 INSTALL BUTTON */}
+      <InstallButton />
     </Suspense>
   );
 }
